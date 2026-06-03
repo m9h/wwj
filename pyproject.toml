@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wwj"
+version = "0.0.1"
+description = "JAX/Equinox port of WeightWatcher (Martin & Mahoney HT-SR; Martin RG theory of learning arXiv 2026). Per-layer spectral diagnostics + a differentiable alpha-toward-2 regularizer for RG-guided optimization."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Morgan Hough", email = "morgan.hough@gmail.com" }]
+dependencies = [
+    "jax>=0.4.30",
+    "jaxlib>=0.4.30",
+    "equinox>=0.11.0",
+    "jaxtyping>=0.2.30",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "weightwatcher",  # CalculatedContent fork; install editable from /home/mhough/dev/weightwatcher
+    "torch>=2.0",     # to load PyTorch ckpts in the cross-project comparison
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wwj"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
