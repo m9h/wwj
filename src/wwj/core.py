@@ -52,27 +52,31 @@ def _csn_mle_alpha(eigs: Float[Array, "k"], xmin: Float[Array, ""]) -> Float[Arr
     return 1.0 + n / s
 
 
-def _ks_select_xmin(eigs: Float[Array, "k"], n_candidates: int = 32) -> Float[Array, ""]:
-    """Pick xmin by KS distance over a log-spaced grid (CSN 2009).
-    Non-differentiable through argmin; vmap'd inner loop is fast."""
-    lo = jnp.log(jnp.maximum(eigs[-1], 1e-12))
-    hi = jnp.log(eigs[0]) - 0.5            # leave headroom for the tail
-    cands = jnp.exp(jnp.linspace(lo, hi, n_candidates))
+def _ks_select_xmin(eigs: Float[Array, "k"], min_tail_size: int = 50) -> Float[Array, ""]:
+    """Pick xmin by KS distance, searching EVERY eigenvalue as a candidate.
+    Matches the reference powerlaw package (Alstott, Bullmore, Plenz 2014) and the
+    Clauset-Shalizi-Newman (2009) algorithm exactly -- no log-spaced grid
+    approximation. JAX makes this cheap via vmap+jit (an N x N KS computation
+    that the Python reference avoids for compute reasons).
+
+    eigs is sorted descending. tail of candidate xmin = positions [0, m-1] where
+    eigs >= xmin. Empirical CDF P(X <= eigs[i]) = (m + 1 - cumsum_from_top) / m.
+    Candidates with tail < min_tail_size get an unreachable penalty."""
 
     def ks_for(xmin):
-        # eigs is sorted descending; the tail is at positions [0, m-1]. For each
-        # tail point at index i, cumsum(mask) gives the count of values >= eigs[i]
-        # (its rank from the top, 1-indexed). The empirical CDF P(X <= eigs[i])
-        # is rank-from-bottom / m = (m - rank_from_top + 1) / m.
         mask = eigs >= xmin
+        m = jnp.sum(mask)
+        valid = m >= min_tail_size
         a = _csn_mle_alpha(eigs, xmin)
         log_z = jnp.where(mask, jnp.log(eigs / xmin), 0.0)
-        m = jnp.maximum(jnp.sum(mask), 1)
-        emp = jnp.where(mask, (m + 1 - jnp.cumsum(mask)) / m, 0.0)
+        m_safe = jnp.maximum(m, 1)
+        emp = jnp.where(mask, (m_safe + 1 - jnp.cumsum(mask)) / m_safe, 0.0)
         fit = jnp.where(mask, 1.0 - jnp.exp(-(a - 1.0) * log_z), 0.0)
-        return jnp.max(jnp.abs(emp - fit))
+        ks = jnp.max(jnp.abs(emp - fit))
+        return jnp.where(valid, ks, 1e6)
 
-    return cands[jnp.argmin(jax.vmap(ks_for)(cands))]
+    ks_values = jax.vmap(ks_for)(eigs)
+    return eigs[jnp.argmin(ks_values)]
 
 
 def _hill_alpha(eigs: Float[Array, "k"], frac: float = 0.5) -> Float[Array, ""]:
@@ -174,6 +178,96 @@ def summary(stats: list[LayerStats]) -> dict[str, float]:
         "alpha_gt_6": int(jnp.sum(alphas > 6.0)),
         "traps_total": int(sum(s.num_pl_spikes for s in stats)),
         "entropy_mean": float(jnp.mean(jnp.array([s.entropy for s in stats]))),
+    }
+
+
+def bootstrap_alpha_ci(eigs: Float[Array, "k"], n_bootstrap: int = 1000,
+                       ci: float = 0.95, key=None) -> dict:
+    """Bootstrap confidence interval for the power-law exponent alpha.
+    Resamples the eigenvalues with replacement n_bootstrap times, recomputes
+    alpha for each resample using the original xmin, returns the quantile-CI
+    of the bootstrap distribution. JAX vmap makes 1000 iterations near-free --
+    the Python WW supports this but it's slow in numpy because the resampling
+    is serial; here it's one vmap call.
+
+    Args:
+        eigs: descending-sorted eigenvalues (output of _eigvals).
+        n_bootstrap: number of bootstrap iterations.
+        ci: two-sided confidence level (0.95 -> 2.5% and 97.5% quantiles).
+        key: optional PRNGKey; defaults to PRNGKey(0).
+
+    Returns:
+        {"alpha": point-estimate, "xmin": ..., "ci_low": ..., "ci_high": ...,
+         "alpha_std": bootstrap std of alpha, "n_bootstrap": ...}
+    """
+    import jax.random as jr
+    key = jr.PRNGKey(0) if key is None else key
+    xmin = _ks_select_xmin(eigs)
+    alpha = _csn_mle_alpha(eigs, xmin)
+
+    def single_boot(k):
+        idx = jr.choice(k, eigs.shape[0], (eigs.shape[0],), replace=True)
+        return _csn_mle_alpha(eigs[idx], xmin)
+
+    keys = jr.split(key, n_bootstrap)
+    alphas = jax.vmap(single_boot)(keys)
+    lo_q, hi_q = (1 - ci) / 2, (1 + ci) / 2
+    return {
+        "alpha": float(alpha),
+        "xmin": float(xmin),
+        "ci_low": float(jnp.quantile(alphas, lo_q)),
+        "ci_high": float(jnp.quantile(alphas, hi_q)),
+        "alpha_std": float(jnp.std(alphas)),
+        "n_bootstrap": n_bootstrap,
+    }
+
+
+def fit_distributions(eigs: Float[Array, "k"]) -> dict:
+    """Fit power-law, exponential, and lognormal MLEs to the tail and return
+    log-likelihood-ratio statistics for distribution selection. The Python WW
+    fits these one-at-a-time via the powerlaw package's loop; we compute all
+    three in a single jit-able pass.
+
+    A positive `pl_vs_exp_lrt` favors power-law over exponential; same for
+    `pl_vs_ln_lrt` against lognormal. The standard claim "this layer has
+    HTSR alpha=X" needs both LRTs positive to be defensible.
+    """
+    xmin = _ks_select_xmin(eigs)
+    mask = eigs >= xmin
+    m = jnp.maximum(jnp.sum(mask), 1).astype(eigs.dtype)
+    log_eigs = jnp.where(mask, jnp.log(eigs), 0.0)
+    log_z = jnp.where(mask, jnp.log(eigs / xmin), 0.0)
+    excess = jnp.where(mask, eigs - xmin, 0.0)
+
+    # Power-law MLE: alpha = 1 + n / sum log(x/xmin)
+    alpha = 1.0 + m / jnp.sum(log_z)
+    pl_ll = jnp.sum(jnp.where(mask,
+        jnp.log(alpha - 1) + (alpha - 1) * jnp.log(xmin) - alpha * log_eigs, 0.0))
+
+    # Exponential MLE: lambda = 1 / mean(x - xmin); shifted to start at xmin
+    mean_excess = jnp.sum(excess) / m
+    lam = 1.0 / jnp.maximum(mean_excess, 1e-12)
+    exp_ll = jnp.sum(jnp.where(mask, jnp.log(lam) - lam * excess, 0.0))
+
+    # Lognormal MLE on log(tail)
+    mu = jnp.sum(log_eigs) / m
+    sig2 = jnp.sum(jnp.where(mask, (log_eigs - mu) ** 2, 0.0)) / m
+    sig = jnp.sqrt(jnp.maximum(sig2, 1e-12))
+    ln_const = -jnp.log(sig * jnp.sqrt(2 * jnp.pi))
+    ln_ll = jnp.sum(jnp.where(mask, -log_eigs + ln_const - (log_eigs - mu) ** 2 / (2 * sig2), 0.0))
+
+    return {
+        "alpha": float(alpha),
+        "xmin": float(xmin),
+        "tail_size": int(m),
+        "pl_loglik": float(pl_ll),
+        "exp_loglik": float(exp_ll),
+        "ln_loglik": float(ln_ll),
+        "pl_vs_exp_lrt": float(pl_ll - exp_ll),   # >0 favors power-law
+        "pl_vs_ln_lrt": float(pl_ll - ln_ll),     # >0 favors power-law
+        "exp_lambda": float(lam),
+        "ln_mu": float(mu),
+        "ln_sigma": float(sig),
     }
 
 
