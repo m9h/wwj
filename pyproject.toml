@@ -19,8 +19,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+bayes = [
+    "numpyro>=0.15",   # wwjd hierarchical cross-layer model (SVI/NUTS). The conjugate
+                       # per-layer posteriors in wwj.bayes need no extra deps; only the
+                       # hierarchical population model in wwj.hierarchical imports this.
+]
 test = [
     "pytest>=8.0",
+    "numpyro>=0.15",  # exercises the wwjd hierarchical tests
     "weightwatcher",  # CalculatedContent fork; install editable from /home/mhough/dev/weightwatcher
     "torch>=2.0",     # to load PyTorch ckpts in the cross-project comparison
 ]

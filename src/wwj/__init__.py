@@ -14,6 +14,11 @@ from wwj.bayes import (
     alpha_posterior_bma,
     model_posterior,
     ppc_pvalue,
+    BayesLayerStats,
+    bayes_analyze,
+    bayes_analyze_matrix,
+    bayes_summary,
+    bayes_alpha_loss,
 )
 from wwj.hierarchical import hierarchical_alpha, hierarchical_analyze
 
@@ -30,6 +35,11 @@ __all__ = [
     "alpha_posterior_bma",
     "model_posterior",
     "ppc_pvalue",
+    "BayesLayerStats",
+    "bayes_analyze",
+    "bayes_analyze_matrix",
+    "bayes_summary",
+    "bayes_alpha_loss",
     "hierarchical_alpha",
     "hierarchical_analyze",
 ]

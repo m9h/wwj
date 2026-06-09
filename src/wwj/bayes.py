@@ -14,12 +14,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import jax
 import jax.numpy as jnp
 from jax.scipy.special import gammainc, gammaln, ndtri
 from jaxtyping import Array, Float
 
-from wwj.core import _ks_select_xmin
+from wwj.core import _ks_select_xmin, _eigvals, _hill_alpha, _walk_matrices
 
 
 def _gammaincinv(a: Float[Array, ""], q: Float[Array, ""],
@@ -361,3 +363,96 @@ def ppc_pvalue(eigs: Float[Array, "k"], xmin: Float[Array, ""] | None = None,
         "tail_size": n,
         "n_rep": n_rep,
     }
+
+
+# --- Phase 6: wwjd surfaces (mirror of core.analyze / summary / alpha_loss) ----
+
+@dataclass(frozen=True)
+class BayesLayerStats:
+    name: str
+    alpha_mean: float          # BMA posterior mean of alpha (over xmin windows)
+    alpha_std: float           # posterior SD (within + across window)
+    ci_low: float
+    ci_high: float
+    p_alpha_lt_2: float        # posterior P(alpha < 2)
+    best_model: str            # argmax of Bayesian model comparison
+    prob_powerlaw: float       # posterior prob the tail is power-law
+    xmin: float                # MAP scaling window
+    tail_size: int
+    ppc_pvalue: float | None   # posterior-predictive p-value (None unless ppc=True)
+
+
+def bayes_analyze_matrix(W: Float[Array, "n m"], name: str = "",
+                         min_tail_size: int = 50, ppc: bool = False,
+                         key=None) -> BayesLayerStats:
+    """Bayesian per-matrix record: BMA alpha posterior + model comparison, with an
+    optional posterior-predictive check (off by default -- it samples)."""
+    eigs = _eigvals(W)
+    bma = alpha_posterior_bma(eigs, min_tail_size=min_tail_size)
+    mp = model_posterior(eigs)
+    pv = ppc_pvalue(eigs, key=key)["p_value"] if ppc else None
+    return BayesLayerStats(
+        name=name,
+        alpha_mean=bma["alpha_mean"],
+        alpha_std=bma["alpha_std"],
+        ci_low=bma["ci_low"],
+        ci_high=bma["ci_high"],
+        p_alpha_lt_2=bma["p_alpha_lt_2"],
+        best_model=mp["best_model"],
+        prob_powerlaw=mp["prob_powerlaw"],
+        xmin=bma["xmin_map"],
+        tail_size=mp["tail_size"],
+        ppc_pvalue=pv,
+    )
+
+
+def bayes_analyze(model, min_dim: int = 50, min_tail_size: int = 50,
+                  ppc: bool = False) -> list[BayesLayerStats]:
+    """Bayesian analogue of wwj.analyze: a BayesLayerStats per 2D weight matrix."""
+    return [bayes_analyze_matrix(W, name=name, min_tail_size=min_tail_size, ppc=ppc)
+            for name, W in _walk_matrices(model, min_dim=min_dim)]
+
+
+def bayes_summary(stats: list[BayesLayerStats]) -> dict:
+    """Aggregate Bayesian per-layer stats into a population diagnostic line."""
+    if not stats:
+        return {"n_layers": 0}
+    means = jnp.array([s.alpha_mean for s in stats])
+    return {
+        "n_layers": len(stats),
+        "alpha_mean": float(jnp.mean(means)),
+        "alpha_median": float(jnp.median(means)),
+        "alpha_dist_mean": float(jnp.mean(jnp.abs(means - 2.0))),
+        "mean_posterior_std": float(jnp.mean(jnp.array([s.alpha_std for s in stats]))),
+        "mean_p_alpha_lt_2": float(jnp.mean(jnp.array([s.p_alpha_lt_2 for s in stats]))),
+        "frac_powerlaw_best": float(jnp.mean(jnp.array(
+            [1.0 if s.best_model == "powerlaw" else 0.0 for s in stats]))),
+        "mean_prob_powerlaw": float(jnp.mean(jnp.array([s.prob_powerlaw for s in stats]))),
+    }
+
+
+def bayes_alpha_loss(model, target: float = 2.0, min_dim: int = 50,
+                     hill_frac: float = 0.5, a0: float = 1e-3, b0: float = 1e-3,
+                     var_weight: float = 0.0, weight: float = 1.0) -> Float[Array, ""]:
+    """Differentiable, posterior-aware alpha->target regulariser. Uses the Hill
+    window (a fixed top fraction -- gradient-friendly, unlike the KS argmin) to form
+    the closed-form Gamma posterior on beta = alpha - 1, then penalises the posterior
+    MEAN toward `target` and optionally the posterior VARIANCE (var_weight>0 rewards
+    confident, sharply-power-law layers). Drop into any optax loss like alpha_loss."""
+    mats = _walk_matrices(model, min_dim=min_dim)
+    if not mats:
+        return jnp.zeros(())
+
+    def layer_term(W):
+        eigs = _eigvals(W)
+        k = max(1, int(eigs.shape[0] * hill_frac))
+        top = eigs[:k]
+        S = jnp.sum(jnp.log(top / top[-1]))      # sum log(lambda/xmin) on Hill window
+        post_a = a0 + k
+        post_b = b0 + S
+        mean_alpha = 1.0 + post_a / post_b
+        var_alpha = post_a / post_b ** 2
+        return (mean_alpha - target) ** 2 + var_weight * var_alpha
+
+    terms = jnp.stack([layer_term(W) for _, W in mats])
+    return weight * jnp.mean(terms)
