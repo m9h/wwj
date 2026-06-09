@@ -140,10 +140,12 @@ def model_summary(name: str, rows: list[dict], extra: dict | None = None) -> dic
         "n_layers": len(df),
         "n_degenerate_freq": int((~np.isfinite(df["alpha_freq"])).sum()),
         "n_degenerate_bayes": int((~np.isfinite(df["alpha_bayes"])).sum()),
-        # Charles's weighted-alpha alpha_hat = sum_l alpha_l * log10(||W_l||_2^2) (point)
-        # vs its posterior-mean counterpart
-        "alpha_hat_freq": float(np.nansum(df["alpha_freq"].to_numpy() * w)),
-        "alpha_hat_bayes": float(np.nansum(df["alpha_bayes"].to_numpy() * w)),
+        # WeightWatcher's weighted-alpha: the MEAN (not sum) over layers of
+        # alpha_l * log10(lambda_max_l). The mean is depth-robust; a sum carries a
+        # depth confound (more layers -> larger sum) that inverts the trend sign
+        # (the Simpson's paradox the PGDL post-mortem warns about). Point vs posterior-mean.
+        "alpha_hat_freq": float(np.nanmean(df["alpha_freq"].to_numpy() * w)),
+        "alpha_hat_bayes": float(np.nanmean(df["alpha_bayes"].to_numpy() * w)),
         "mean_alpha_freq": float(df["alpha_freq"].mean()),
         "mean_alpha_bayes": float(df["alpha_bayes"].mean()),
         "median_alpha_bayes": float(df["alpha_bayes"].median()),

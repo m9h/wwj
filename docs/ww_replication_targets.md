@@ -85,8 +85,41 @@ model comparison). wwjd replaces all three with posteriors.
 per-layer + per-model comparison tables. Start with #1 (GPT/GPT2) + #4 (VGG): the
 confirm-then-nuance arc, both trivial loads.
 
-## Open questions (answered by running the survey)
-- Per-layer α point estimates + eigenvalue sample sizes for GPT early layers and
-  DenseNet α~8 layers → expected posterior width + Bayes-factor power.
-- Does PGDL within-subgroup anti-correlation survive a hierarchical posterior?
-- Do SETOL "Ideal" layers' α posteriors contain 2?
+## RESULTS (2026-06-09, benchmarks/ww_replication.py, torchvision VGG + HF GPT/GPT2)
+
+Three findings, all on Martin & Mahoney's own published checkpoints:
+
+**1. GPT/GPT2 dissolves under xmin marginalization (overturn — the headline).**
+The "GPT poorly-trained, GPT2 well-trained" claim rests on GPT's frequentist
+mean α = 4.12 ("numerous unusually large α"). Under the BMA posterior over xmin,
+**GPT sits at 2.90 — the same healthy band as GPT2 (2.73) and GPT2-medium (2.75).**
+The frequentist gap (GPT−GPT2 = 0.50) shrinks ~3× to 0.16. Per layer, GPT's
+768×768 attention projections drop from freq α 5.2–6.9 to bayes α 2.8–3.5, and
+the Bayes factor calls every one `powerlaw` (P=1.0) — contra "not well-described
+by a PL fit." Validated stable across the zero-eigenvalue bug fix (2.897 before
+and after), so it is not a numerical artifact. Mechanism = Charles's own conceded
+"plain PL fits over-estimate α" (the reason WW ships TPL): the single KS-xmin
+inflates α on hard-to-fit layers; marginalizing the window corrects it.
+
+**2. VGG α̂ confirm — and the Bayesian version is SHARPER (confirm + bonus).**
+Weighted-alpha α̂ = mean_l(α_l · log10 λmax,l) vs ImageNet top-1, Pearson r:
+frequentist −0.772 (reproduces Charles's "smaller α̂ → higher accuracy"),
+**Bayesian −0.982 (near-perfect — stronger than frequentist).** The BMA correction
+that pulls down inflated large-α layers makes the metric MORE predictive.
+NB the metric must be the MEAN over layers; a SUM gives +0.78 (depth confound),
+and the unweighted mean α gives +0.89 (the Simpson's paradox the post-mortem
+paper warns about) — wwjd reproduces both the right answer and the trap.
+
+**3. BatchNorm breaks the power law (new observation).**
+BN-VGG variants have 8–17% of layers Bayes-factor-rejected as non-power-law,
+rising with depth (vgg19_bn 17%); plain VGG and all GPT models are 0%. The
+Bayesian model comparison (model_posterior) sees structure the point-α is blind to.
+
+Data: /data/mhough/wwj_ww_replication/ (per-layer CSVs + summary). A zero-eigenvalue
+BMA NaN bug was caught + fixed on VGG16 during this run (commit 76380dd).
+
+## Open questions (next runs)
+- DenseNet α~8 layers (#2 shortlist) — the clearest formal PL-rejection target, untested.
+- PGDL within-subgroup anti-correlation under a hierarchical posterior (#3 shortlist).
+- SETOL "Ideal" layers' α posteriors: do they contain 2? (#5 shortlist).
+- ppc_pvalue + per-layer Bayes-factor detail on the GPT large-α layers (in progress).
