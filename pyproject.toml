@@ -24,6 +24,13 @@ test = [
     "weightwatcher",  # CalculatedContent fork; install editable from /home/mhough/dev/weightwatcher
     "torch>=2.0",     # to load PyTorch ckpts in the cross-project comparison
 ]
+benchmarks = [
+    "torch>=2.0",
+    "pandas>=2.0",
+    "huggingface_hub>=0.20",
+    "safetensors>=0.4",
+    "timm>=1.0",           # for Virchow / Virchow2 / GigaPath via timm.create_model
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wwj"]

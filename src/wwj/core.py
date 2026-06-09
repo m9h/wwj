@@ -85,7 +85,7 @@ def _ks_select_xmin(eigs: Float[Array, "k"], min_tail_size: int = 50) -> Float[A
     def ks_for(xmin):
         mask = eigs >= xmin
         m = jnp.sum(mask)
-        valid = m >= min_tail_size
+        valid = (m >= min_tail_size) & (xmin > 0.0)  # positive xmin only
         a = _csn_mle_alpha(eigs, xmin)
         log_z = jnp.where(mask, jnp.log(eigs / xmin), 0.0)
         m_safe = jnp.maximum(m, 1)
@@ -221,6 +221,14 @@ def bootstrap_alpha_ci(eigs: Float[Array, "k"], n_bootstrap: int = 1000,
     """
     import jax.random as jr
     key = jr.PRNGKey(0) if key is None else key
+
+    # Degenerate / near-dead layer: too few meaningful eigenvalues to fit a tail.
+    # Flag it instead of returning a garbage alpha (its ESD has no power-law).
+    if _n_meaningful(eigs) < 50:
+        return {"alpha": float("nan"), "xmin": float("nan"), "ci_low": float("nan"),
+                "ci_high": float("nan"), "alpha_std": float("nan"),
+                "n_bootstrap": 0, "degenerate": True}
+
     xmin = _ks_select_xmin(eigs)
     alpha = _csn_mle_alpha(eigs, xmin)
 
@@ -230,14 +238,16 @@ def bootstrap_alpha_ci(eigs: Float[Array, "k"], n_bootstrap: int = 1000,
 
     keys = jr.split(key, n_bootstrap)
     alphas = jax.vmap(single_boot)(keys)
+    alphas = alphas[jnp.isfinite(alphas)]  # drop degenerate resamples before quantiles
     lo_q, hi_q = (1 - ci) / 2, (1 + ci) / 2
     return {
         "alpha": float(alpha),
         "xmin": float(xmin),
-        "ci_low": float(jnp.quantile(alphas, lo_q)),
-        "ci_high": float(jnp.quantile(alphas, hi_q)),
-        "alpha_std": float(jnp.std(alphas)),
-        "n_bootstrap": n_bootstrap,
+        "ci_low": float(jnp.quantile(alphas, lo_q)) if alphas.size else float("nan"),
+        "ci_high": float(jnp.quantile(alphas, hi_q)) if alphas.size else float("nan"),
+        "alpha_std": float(jnp.std(alphas)) if alphas.size else float("nan"),
+        "n_bootstrap": int(alphas.size),
+        "degenerate": False,
     }
 
 
@@ -251,6 +261,12 @@ def fit_distributions(eigs: Float[Array, "k"]) -> dict:
     `pl_vs_ln_lrt` against lognormal. The standard claim "this layer has
     HTSR alpha=X" needs both LRTs positive to be defensible.
     """
+    if _n_meaningful(eigs) < 50:  # degenerate/near-dead layer: no fittable tail
+        return {"alpha": float("nan"), "xmin": float("nan"), "tail_size": 0,
+                "pl_loglik": float("nan"), "exp_loglik": float("nan"),
+                "ln_loglik": float("nan"), "pl_vs_exp_lrt": float("nan"),
+                "pl_vs_ln_lrt": float("nan"), "exp_lambda": float("nan"),
+                "ln_mu": float("nan"), "ln_sigma": float("nan"), "degenerate": True}
     xmin = _ks_select_xmin(eigs)
     mask = eigs >= xmin
     m = jnp.maximum(jnp.sum(mask), 1).astype(eigs.dtype)
