@@ -16,6 +16,10 @@ Per-layer spectral diagnostics (HTSR α via Clauset-Shalizi-Newman MLE + KS wind
 
 MVP. Validated against the CalculatedContent WeightWatcher fork as numerical oracle on representative weight matrices from four projects (smri-fm, nanopath, eeg-fm-spectral, hippy-feat). See `benchmarks/compare_projects.py`.
 
+## Workshop paper
+
+[`paper/wwj_rg_robustness.pdf`](paper/wwj_rg_robustness.pdf) — ICBINB-style workshop draft of the RG-robustness experiments. Tests Martin's RG-theory prediction that α ≈ 2 yields better robustness using `wwj` to estimate α and `wwj.alpha_loss` as the interventional handle. See [`paper/README.md`](paper/README.md) for the rebuild instructions.
+
 Known rough edges are listed at the bottom of `src/wwj/core.py` — fix before any published comparison.
 
 ## JAX-exact features beyond the Python WW
