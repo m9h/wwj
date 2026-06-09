@@ -36,6 +36,8 @@ benchmarks = [
     "huggingface_hub>=0.20",
     "safetensors>=0.4",
     "timm>=1.0",           # for Virchow / Virchow2 / GigaPath via timm.create_model
+    "torchvision>=0.15",   # VGG/ResNet/DenseNet ImageNet checkpoints (ww_replication)
+    "transformers>=4.30",  # GPT / GPT2 checkpoints (ww_replication)
 ]
 
 [tool.hatch.build.targets.wheel]
