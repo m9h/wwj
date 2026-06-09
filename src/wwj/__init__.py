@@ -9,6 +9,13 @@ from wwj.core import (
     summary,
     _eigvals,
 )
+from wwj.bayes import (
+    alpha_posterior,
+    alpha_posterior_bma,
+    model_posterior,
+    ppc_pvalue,
+)
+from wwj.hierarchical import hierarchical_alpha, hierarchical_analyze
 
 __all__ = [
     "LayerStats",
@@ -19,5 +26,11 @@ __all__ = [
     "fit_distributions",
     "summary",
     "_eigvals",
+    "alpha_posterior",
+    "alpha_posterior_bma",
+    "model_posterior",
+    "ppc_pvalue",
+    "hierarchical_alpha",
+    "hierarchical_analyze",
 ]
 __version__ = "0.0.1"

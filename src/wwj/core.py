@@ -35,12 +35,28 @@ class LayerStats:
     lambda_max: Float[Array, ""]
 
 
+# Eigenvalues below this (relative to the matrix's largest) are numerical zero,
+# not part of the spectrum. Real trained models DO contain near-dead / low-rank
+# weight matrices (e.g. POYO learns to zero out some attention/proc projections
+# while still decoding); their ESD has no meaningful heavy tail, so alpha is
+# undefined there. We must report that as degenerate rather than nan-poison the
+# aggregate (eigvals -> 0 -> log(0) -> nan was rough-edge that broke real models).
+_EIG_RTOL = 1e-9
+
+
 def _eigvals(W: Float[Array, "n m"]) -> Float[Array, "k"]:
-    """Eigenvalues of W^T W / N (smaller side), sorted descending."""
+    """Eigenvalues of W^T W / N (smaller side), sorted descending.
+    W^T W is PSD; tiny negatives from finite precision are clipped to 0."""
     n, m = W.shape
     N = max(n, m)
     X = (W.T @ W) / N if n >= m else (W @ W.T) / N
-    return jnp.linalg.eigvalsh(X)[::-1]
+    return jnp.maximum(jnp.linalg.eigvalsh(X)[::-1], 0.0)
+
+
+def _n_meaningful(eigs: Float[Array, "k"]) -> int:
+    """Count eigenvalues above the relative numerical-zero floor."""
+    floor = float(eigs.max()) * _EIG_RTOL
+    return int(jnp.sum(eigs > floor))
 
 
 def _csn_mle_alpha(eigs: Float[Array, "k"], xmin: Float[Array, ""]) -> Float[Array, ""]:
