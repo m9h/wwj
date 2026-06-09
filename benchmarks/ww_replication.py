@@ -133,13 +133,17 @@ def analyse_matrix(name: str, W: np.ndarray) -> dict:
 def model_summary(name: str, rows: list[dict], extra: dict | None = None) -> dict:
     df = pd.DataFrame(rows)
     w = df["log10_snorm2"].to_numpy()   # WeightWatcher's log10(||W||_2^2) weighting
+    # nansum so a single un-fittable layer (KS tail too small -> freq alpha NaN, or a
+    # degenerate BMA layer) doesn't poison the whole-model metric; report the counts.
     s = {
         "model": name,
         "n_layers": len(df),
+        "n_degenerate_freq": int((~np.isfinite(df["alpha_freq"])).sum()),
+        "n_degenerate_bayes": int((~np.isfinite(df["alpha_bayes"])).sum()),
         # Charles's weighted-alpha alpha_hat = sum_l alpha_l * log10(||W_l||_2^2) (point)
         # vs its posterior-mean counterpart
-        "alpha_hat_freq": float(np.sum(df["alpha_freq"].to_numpy() * w)),
-        "alpha_hat_bayes": float(np.sum(df["alpha_bayes"].to_numpy() * w)),
+        "alpha_hat_freq": float(np.nansum(df["alpha_freq"].to_numpy() * w)),
+        "alpha_hat_bayes": float(np.nansum(df["alpha_bayes"].to_numpy() * w)),
         "mean_alpha_freq": float(df["alpha_freq"].mean()),
         "mean_alpha_bayes": float(df["alpha_bayes"].mean()),
         "median_alpha_bayes": float(df["alpha_bayes"].median()),

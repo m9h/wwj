@@ -21,7 +21,7 @@ import jax.numpy as jnp
 from jax.scipy.special import gammainc, gammaln, ndtri
 from jaxtyping import Array, Float
 
-from wwj.core import _ks_select_xmin, _eigvals, _hill_alpha, _walk_matrices
+from wwj.core import _ks_select_xmin, _eigvals, _hill_alpha, _walk_matrices, _EIG_RTOL
 
 
 def _gammaincinv(a: Float[Array, ""], q: Float[Array, ""],
@@ -124,21 +124,29 @@ def _candidate_log_scores(eigs: Float[Array, "k"], a0: float, b0: float,
     evidence) and too-large tails (bulk points that fit the base better)."""
     r0 = 1.0 / jnp.maximum(jnp.mean(eigs), 1e-12)        # fixed exponential base rate
     log_r0 = jnp.log(r0)
+    # Eigenvalues at/below this are numerical zero (dead/low-rank directions), never a
+    # legitimate scaling-window lower bound. Excluding them as xmin candidates is both
+    # the correct model and the fix for the 0/0 -> NaN that a zero-eigenvalue xmin caused
+    # (log(eigs / 0)); the clamps below keep S/post_b finite for the masked-out candidates
+    # so their zero softmax weight never multiplies a NaN.
+    floor = jnp.max(eigs) * _EIG_RTOL
+    tiny = jnp.finfo(eigs.dtype).tiny
 
     def score_for(xmin):
+        xmin_safe = jnp.maximum(xmin, tiny)
         mask = eigs >= xmin
         n = jnp.sum(mask)
-        S = jnp.sum(jnp.where(mask, jnp.log(eigs / xmin), 0.0))
-        sum_log_lam = jnp.sum(jnp.where(mask, jnp.log(eigs), 0.0))
+        S = jnp.sum(jnp.where(mask, jnp.log(jnp.maximum(eigs / xmin_safe, tiny)), 0.0))
+        sum_log_lam = jnp.sum(jnp.where(mask, jnp.log(jnp.maximum(eigs, tiny)), 0.0))
         sum_lam = jnp.sum(jnp.where(mask, eigs, 0.0))
         post_a = a0 + n
-        post_b = b0 + S
+        post_b = jnp.maximum(b0 + S, tiny)               # strictly positive Gamma rate
         # Pareto-tail log evidence on the lambda values (prior const a0*log b0 -
         # gammaln(a0) is window-independent -> dropped, cancels in the softmax):
         log_ev_pl = -sum_log_lam + gammaln(post_a) - post_a * jnp.log(post_b)
         # exponential base log density for the same n points:
         log_ev_base = n * log_r0 - r0 * sum_lam
-        valid = n >= min_tail_size
+        valid = (n >= min_tail_size) & (xmin > floor)
         return n, S, jnp.where(valid, log_ev_pl - log_ev_base, -jnp.inf)
 
     return jax.vmap(score_for)(eigs)
@@ -178,6 +186,12 @@ def alpha_posterior_bma(eigs: Float[Array, "k"], a0: float = 1e-3, b0: float = 1
     """
     n_c, S_c, log_score = _candidate_log_scores(eigs, a0, b0, min_tail_size)
     weights = jax.nn.softmax(log_score)                  # over candidates
+    # Degenerate fallback: if no candidate window is valid (all log_score = -inf ->
+    # softmax = NaN), put all mass on the largest-tail window so summaries stay finite.
+    weights = jnp.where(jnp.isfinite(weights), weights, 0.0)
+    wsum = jnp.sum(weights)
+    weights = jnp.where(wsum > 0, weights / jnp.maximum(wsum, jnp.finfo(eigs.dtype).tiny),
+                        jax.nn.one_hot(jnp.argmax(n_c), n_c.shape[0]))
     post_a = a0 + n_c
     post_b = b0 + S_c
 
