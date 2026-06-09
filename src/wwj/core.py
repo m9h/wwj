@@ -61,11 +61,14 @@ def _n_meaningful(eigs: Float[Array, "k"]) -> int:
 
 def _csn_mle_alpha(eigs: Float[Array, "k"], xmin: Float[Array, ""]) -> Float[Array, ""]:
     """alpha = 1 + n / sum(log(lambda / xmin)) over the tail lambda >= xmin.
-    Uses masked sum so shape stays static (jit-friendly)."""
+    Uses masked sum so shape stays static (jit-friendly). Guards a non-positive
+    xmin (log blow-up) and an empty/degenerate tail (s<=0) by returning nan,
+    so a degenerate resample/layer signals cleanly instead of poisoning stats."""
+    xmin = jnp.maximum(xmin, jnp.finfo(eigs.dtype).tiny)
     mask = eigs >= xmin
     n = jnp.sum(mask)
     s = jnp.sum(jnp.where(mask, jnp.log(eigs / xmin), 0.0))
-    return 1.0 + n / s
+    return jnp.where(s > 0.0, 1.0 + n / s, jnp.nan)
 
 
 def _ks_select_xmin(eigs: Float[Array, "k"], min_tail_size: int = 50) -> Float[Array, ""]:
