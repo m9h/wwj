@@ -73,6 +73,39 @@ tail emerging (with calibrated Bayesian α, BMA-over-window, power-law validity)
 new** — it is `wwjd` applied to a from-scratch nanoGPT run, and it is the platform's unique
 hook.
 
+## 4b. What *other groups* have built around nanoGPT (third-party supplementary material)
+
+Yes — a substantial ecosystem, led by a full university course:
+
+- **Stanford CS336 "Language Modeling from Scratch"** (Liang, Hashimoto; 2025/2026) — the
+  flagship academic course in exactly this lineage ("from scratch," OS-course-style). Five
+  assignments mirror our module map: **A1 basics** (tokenizer + transformer + optimizer),
+  **A2 systems** (FlashAttention-2 in Triton, distributed training), **A3 scaling** (fit a
+  scaling law), **A4 data** (filter + dedup Common Crawl → the FineWeb-style data lesson),
+  **A5 alignment** (SFT + RL + DPO). Public lectures, assignments, and code. **Notably it has
+  no "look inside the weights"/spectral module** — confirming our `wwjd` angle is a genuine
+  gap even against the best existing curriculum, and one that would slot naturally after A3
+  (scaling: "what happens to α as you scale?") or A4 (data: "does cleaner data → healthier
+  tails?").
+- **beyond-nanoGPT** (tanishqkumar) — minimal, *annotated* from-scratch implementations of
+  ~100 modern DL techniques, explicitly bridging nanoGPT → research-level work. The best
+  "what's next after nanoGPT" supplement.
+- **minGPT** (Karpathy) — the *educational* predecessor; nanoGPT is its functionality-first
+  rewrite, so minGPT is still the cleanest "understand the model" reading.
+- **Speedrun field guides** (Romero worklog, Conway "Field Guide", the LessWrong WR-drop
+  writeup) — community-written explainers of *why* each optimization works; excellent
+  teaching material.
+- **Cloud tutorials** (AI Engineering Academy: nanoGPT-on-Modal, nanochat-on-Modal) and
+  **NVIDIA NeMo-AutoModel**'s nanoGPT pretraining guide — institutional "run it" material.
+- **The long tail**: `github.com/topics/nanogpt` (forks), and many written walkthroughs
+  (Chumbar's deep-dive, the artinte walkthrough, Medium guides).
+
+**Takeaway for us:** the ecosystem is mature on *build/train/scale/data/align* but empty on
+*spectral diagnostics of the trained weights*. We do not need to re-teach the transformer —
+CS336/beyond-nanoGPT/build-nanogpt already do it superbly. Our contribution is the **Module
+that opens the weights** (`wwjd` α-trajectory + steering), designed to *plug into* a
+CS336-style course rather than replace it.
+
 ## 5. Proposed platform = nanoGPT + the spectral lens
 
 Spine: **build-nanogpt** (model + FineWeb). Instrumentation: **`wwj`/`wwjd`** as a
@@ -121,3 +154,9 @@ is cheap (single-GPU speedrun forks exist) and fully reproducible.
 - The Annotated Transformer: https://nlp.seas.harvard.edu/annotated-transformer/
 - Prisma (mech-interp toolkit): https://arxiv.org/html/2504.19475v1
 - nanoGPT deep-dive (Chumbar): https://medium.com/@shawn.chumbar/understanding-nanogpt-a-deep-dive-into-transformer-architecture-implementation-9a7167b7d58c
+
+**Other groups' supplementary material (courses + annotated forks)**
+- Stanford CS336 "Language Modeling from Scratch": https://cs336.stanford.edu/ · lectures: https://www.youtube.com/playlist?list=PLoROMvodv4rOY23Y0BoGoBGgQ1zmU_MT_ · org: https://github.com/stanford-cs336
+- beyond-nanoGPT (annotated ~100 techniques): https://github.com/tanishqkumar/beyond-nanogpt
+- minGPT (educational predecessor): https://github.com/karpathy/minGPT
+- nanoGPT topic hub (forks): https://github.com/topics/nanogpt
