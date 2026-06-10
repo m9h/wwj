@@ -35,7 +35,12 @@ Wherever the reference WeightWatcher takes a shortcut for compute reasons, wwj d
 
 ## Bayesian extension (`wwjd` — *what would Jaynes do*)
 
-`wwjd` is the Bayesian layer: *what would Jaynes do* with a heavy-tailed weight spectrum? Headed to [MaxEnt 2027 — the 45th International Workshop on Bayesian Inference and Maximum Entropy Methods in Science and Engineering](https://indico.dzastro.de/event/12/) (Görlitz, Sep 20–24 2027).
+`wwjd` is the Bayesian layer: *what would Jaynes do* with a heavy-tailed weight spectrum? Headed to [MaxEnt 2027 — the 45th International Workshop on Bayesian Inference and Maximum Entropy Methods in Science and Engineering](https://indico.dzastro.de/event/12/) (Görlitz, Sep 20–24 2027), the workshop series built on E. T. Jaynes' maximum-entropy / Bayesian-probability lineage.
+
+**Reading — Jaynes, *Probability Theory: The Logic of Science*** (Cambridge UP, 2003; ed. G. L. Bretthorst):
+- **Full manuscript PDF** (the source) from the official WUSTL Bayes repository: [bayes.wustl.edu/etj/prob/book.pdf](https://bayes.wustl.edu/etj/prob/book.pdf). Per-chapter PostScript/PDF + historical notes at the [repository root](https://bayes.wustl.edu/etj/prob.html).
+- **Companion index + errata** (Arnold Baise) — searchable name/subject index and a running corrections file for the 2005 reprint, plus reviews: [etjaynesinfo.com](http://www.etjaynesinfo.com/). (The published edition has a famously sparse index and a number of typos.)
+- **Open access**: the published 2003/2004 Cambridge edition is borrowable/streamable on the [Internet Archive](https://archive.org/search?query=Jaynes+Probability+Theory+The+Logic+of+Science).
 
 Where the core reports frequentist *point* estimates of α, the Bayesian layer reports *calibrated posteriors*. Most of it is closed-form: the tail above `xmin` is Pareto, the substitution `t = log(λ/xmin)` makes it Exponential with rate `β = α − 1`, and a conjugate `Gamma(a₀, b₀)` prior on β gives an exact `Gamma(a₀+n, b₀+Σt)` posterior — so credible intervals are Gamma quantiles, `P(α<2)` is a Gamma CDF, and it's all differentiable. Only the cross-layer hierarchical model samples (NumPyro). Design notes: [`docs/wwjd_plan.md`](docs/wwjd_plan.md).
 
