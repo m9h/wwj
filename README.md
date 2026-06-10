@@ -33,7 +33,9 @@ Wherever the reference WeightWatcher takes a shortcut for compute reasons, wwj d
 - **`fit_distributions(eigs)`** — fits power-law + exponential + lognormal MLEs in a single jit pass; returns Vuong's LRT (positive = power-law preferred). The reference WW loops through distributions one-at-a-time via the `powerlaw` package; we do them in parallel. This is the standard "is this layer actually a power-law?" validation that HTSR α claims require.
 - **`alpha_loss(model, target=2.0)`** — fully-differentiable α→2 regularizer via the Hill estimator; plug into any optax loss. This is the explicit alternative to Muon's indirect spectral shaping per Martin's RG theory.
 
-## Bayesian extension (`wwjd`)
+## Bayesian extension (`wwjd` — *what would Jaynes do*)
+
+`wwjd` is the Bayesian layer: *what would Jaynes do* with a heavy-tailed weight spectrum? Headed to [MaxEnt 2027 — the 45th International Workshop on Bayesian Inference and Maximum Entropy Methods in Science and Engineering](https://indico.dzastro.de/event/12/) (Görlitz, Sep 20–24 2027).
 
 Where the core reports frequentist *point* estimates of α, the Bayesian layer reports *calibrated posteriors*. Most of it is closed-form: the tail above `xmin` is Pareto, the substitution `t = log(λ/xmin)` makes it Exponential with rate `β = α − 1`, and a conjugate `Gamma(a₀, b₀)` prior on β gives an exact `Gamma(a₀+n, b₀+Σt)` posterior — so credible intervals are Gamma quantiles, `P(α<2)` is a Gamma CDF, and it's all differentiable. Only the cross-layer hierarchical model samples (NumPyro). Design notes: [`docs/wwjd_plan.md`](docs/wwjd_plan.md).
 
