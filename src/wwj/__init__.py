@@ -14,13 +14,15 @@ from wwj.bayes import (
     alpha_posterior_bma,
     model_posterior,
     ppc_pvalue,
+    prob_in_rope,
+    prior_sensitivity,
     BayesLayerStats,
     bayes_analyze,
     bayes_analyze_matrix,
     bayes_summary,
     bayes_alpha_loss,
 )
-from wwj.hierarchical import hierarchical_alpha, hierarchical_analyze
+from wwj.hierarchical import hierarchical_alpha, hierarchical_analyze, accuracy_alpha_regression
 
 __all__ = [
     "LayerStats",
@@ -35,6 +37,8 @@ __all__ = [
     "alpha_posterior_bma",
     "model_posterior",
     "ppc_pvalue",
+    "prob_in_rope",
+    "prior_sensitivity",
     "BayesLayerStats",
     "bayes_analyze",
     "bayes_analyze_matrix",
@@ -42,5 +46,6 @@ __all__ = [
     "bayes_alpha_loss",
     "hierarchical_alpha",
     "hierarchical_analyze",
+    "accuracy_alpha_regression",
 ]
 __version__ = "0.0.1"

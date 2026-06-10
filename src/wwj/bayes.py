@@ -106,6 +106,67 @@ def alpha_posterior(eigs: Float[Array, "k"], xmin: Float[Array, ""] | None = Non
     }
 
 
+def prob_in_rope(eigs: Float[Array, "k"], center: float = 2.0, delta: float = 0.1,
+                 xmin: Float[Array, ""] | None = None, a0: float = 1e-3, b0: float = 1e-3) -> dict:
+    """Posterior probability that alpha lies in a Region Of Practical Equivalence
+    [center-delta, center+delta]. The rigorous Bayesian-estimation form of SETOL's
+    'Ideal layer' claim (alpha = 2): instead of asking whether the point estimate is
+    close to 2, ask how much posterior mass sits in a practically-equivalent band.
+
+    alpha = 1 + beta, beta ~ Gamma(post_a, post_b), so P(alpha in [lo, hi]) is the
+    exact Gamma-CDF difference P(beta < hi-1) - P(beta < lo-1).
+    """
+    if xmin is None:
+        xmin = _ks_select_xmin(eigs)
+    n, S = _tail_stats(eigs, xmin)
+    post_a = a0 + n
+    post_b = b0 + S
+    lo = jnp.maximum(center - delta - 1.0, 0.0)            # beta lower (alpha-1)
+    hi = jnp.maximum(center + delta - 1.0, 0.0)
+    p = gammainc(post_a, post_b * hi) - gammainc(post_a, post_b * lo)
+    return {
+        "center": center, "delta": delta,
+        "rope_low": center - delta, "rope_high": center + delta,
+        "prob_in_rope": float(p),
+        "alpha_mean": float(1.0 + post_a / post_b),
+        "tail_size": int(n),
+    }
+
+
+def prior_sensitivity(eigs: Float[Array, "k"], xmin: Float[Array, ""] | None = None,
+                      a0: float = 1e-3, b0: float = 1e-3,
+                      scales=(0.25, 0.5, 1.0, 2.0, 4.0)) -> dict:
+    """Power-scaling prior-sensitivity diagnostic (Kallioinen et al. 2023, priorsense):
+    scale the prior strength (a0, b0) by each k and measure how much the posterior mean
+    of alpha moves. A weakly-informative prior on a well-populated tail should barely
+    move (low sensitivity); a large swing means the conclusion is prior-driven and the
+    credible interval should not be trusted at face value.
+
+    Returns the per-scale alpha posterior means, the max absolute shift vs the k=1
+    baseline, and a normalised sensitivity = max_shift / baseline_posterior_sd.
+    """
+    if xmin is None:
+        xmin = _ks_select_xmin(eigs)
+    n, S = _tail_stats(eigs, xmin)
+
+    def alpha_mean_at(k):
+        post_a = k * a0 + n
+        post_b = k * b0 + S
+        return 1.0 + post_a / post_b
+
+    means = {float(k): float(alpha_mean_at(k)) for k in scales}
+    base = float(alpha_mean_at(1.0))
+    base_sd = float(jnp.sqrt((a0 + n)) / (b0 + S))         # Gamma posterior SD of beta=alpha-1
+    max_shift = max(abs(v - base) for v in means.values())
+    return {
+        "alpha_mean_by_scale": means,
+        "baseline_alpha_mean": base,
+        "max_abs_shift": max_shift,
+        "sensitivity": float(max_shift / max(base_sd, 1e-12)),   # shift in posterior-SD units
+        "tail_size": int(n),
+    }
+
+
 # --- Phase 2: posterior over the scaling window xmin + Bayesian model averaging --
 
 def _candidate_log_scores(eigs: Float[Array, "k"], a0: float, b0: float,
@@ -276,9 +337,87 @@ def _logev_lognormal(eigs, xmin, kappa0: float, a_ig: float, b_ig: float):
     return -sum_log_lam + nig
 
 
+def _laplace_logev(neg_log_post, theta0, n_iter: int = 40, damp: float = 1e-6):
+    """Laplace approximation to a log marginal likelihood for models without a
+    closed-form evidence. neg_log_post(theta) = -(loglik + logprior) on an
+    unconstrained theta. Newton-minimise, then
+        log Z ~= -neg_log_post(theta_hat) + (d/2)log(2pi) - (1/2)log|H|.
+    Used for the truncated-power-law (1D) and generalized-Pareto (2D) tails, whose
+    normalisers are not conjugate."""
+    d = theta0.shape[0]
+    eye = jnp.eye(d)
+
+    def step(theta, _):
+        g = jax.grad(neg_log_post)(theta)
+        H = jax.hessian(neg_log_post)(theta) + damp * eye
+        return theta - jnp.linalg.solve(H, g), None
+
+    theta_hat, _ = jax.lax.scan(step, theta0, None, length=n_iter)
+    H = jax.hessian(neg_log_post)(theta_hat) + damp * eye
+    _, logdet = jnp.linalg.slogdet(H)
+    return -neg_log_post(theta_hat) + 0.5 * d * jnp.log(2.0 * jnp.pi) - 0.5 * logdet
+
+
+def _logev_tpl(eigs, xmin, a0: float, b0: float):
+    """Log marginal likelihood of the tail under a TRUNCATED power law on
+    [xmin, xmax=max tail eigenvalue]: p(lambda) prop lambda^-alpha, alpha>1, with an
+    upper cutoff. This is the model WeightWatcher ships (TPL) because plain PL
+    over-estimates alpha when the tail is finite. beta=alpha-1 ~ Gamma(a0,b0); the
+    cutoff normaliser is not conjugate, so the evidence uses Laplace in u=log(beta)."""
+    mask = eigs >= xmin
+    n = jnp.sum(mask)
+    sum_log_lam = jnp.sum(jnp.where(mask, jnp.log(eigs), 0.0))
+    xmax = jnp.max(jnp.where(mask, eigs, xmin))
+    log_xmin, log_xmax = jnp.log(xmin), jnp.log(xmax)
+
+    def neg_log_post(u):           # u = log(beta), beta=alpha-1>0
+        beta = jnp.exp(u[0])
+        # log C = log(beta) - log(xmin^-beta - xmax^-beta); use logsumexp-style stable diff
+        log_norm = jnp.log(jnp.maximum(jnp.exp(-beta * log_xmin) - jnp.exp(-beta * log_xmax), 1e-300))
+        loglik = n * (jnp.log(beta) - log_norm) - (beta + 1.0) * sum_log_lam
+        # prior on beta is Gamma(a0,b0); in u-space add the |dbeta/du|=beta Jacobian
+        logprior = a0 * jnp.log(b0) - gammaln(a0) + a0 * u[0] - b0 * beta
+        return -(loglik + logprior)
+
+    # init at the plain-PL MLE beta = n / S
+    _, S = _tail_stats(eigs, xmin)
+    beta0 = jnp.maximum(n / jnp.maximum(S, 1e-6), 1e-3)
+    return _laplace_logev(neg_log_post, jnp.array([jnp.log(beta0)]))
+
+
+def _logev_gpd(eigs, xmin):
+    """Log marginal likelihood of the excesses (lambda - xmin) under a GENERALIZED
+    PARETO distribution -- the extreme-value-theory peaks-over-threshold tail model,
+    params (shape xi, scale sigma>0). Weakly-informative priors xi~N(0,1),
+    log sigma~N(log mean_excess, 1). Excess transform has unit Jacobian, so this
+    evidence is comparable to the exponential/PL lambda-density evidences."""
+    mask = eigs >= xmin
+    n = jnp.sum(mask)
+    y = jnp.where(mask, eigs - xmin, 0.0)
+    mean_excess = jnp.sum(y) / jnp.maximum(n, 1)
+    log_sig0 = jnp.log(jnp.maximum(mean_excess, 1e-6))
+
+    def neg_log_post(theta):       # theta = [xi, log_sigma]
+        xi, s = theta[0], theta[1]
+        sigma = jnp.exp(s)
+        z = 1.0 + xi * y / sigma
+        z = jnp.where(mask, jnp.maximum(z, 1e-12), 1.0)    # support guard
+        # GPD log density of the excesses; xi->0 limit handled by the same formula numerically
+        ll_terms = -s - (1.0 / xi + 1.0) * jnp.log(z)
+        # near xi=0, fall back to exponential log density -s - y/sigma
+        ll_exp = -s - y / sigma
+        ll_terms = jnp.where(jnp.abs(xi) < 1e-4, ll_exp, ll_terms)
+        loglik = jnp.sum(jnp.where(mask, ll_terms, 0.0))
+        logprior = -0.5 * xi ** 2 - 0.5 * (s - log_sig0) ** 2   # N(0,1) and N(log_sig0,1)
+        return -(loglik + logprior)
+
+    return _laplace_logev(neg_log_post, jnp.array([0.1, log_sig0]))
+
+
 def model_posterior(eigs: Float[Array, "k"], xmin: Float[Array, ""] | None = None,
                     a0: float = 1.0, b0: float = 1.0, c0: float = 1.0, d0: float = 1.0,
-                    kappa0: float = 1.0, a_ig: float = 1.0, b_ig: float = 1.0) -> dict:
+                    kappa0: float = 1.0, a_ig: float = 1.0, b_ig: float = 1.0,
+                    extended: bool = False) -> dict:
     """Bayesian replacement for fit_distributions' Vuong LRT: analytic marginal
     likelihoods for power-law / exponential / lognormal on the same tail, turned
     into Bayes factors and (equal-prior) posterior model probabilities.
@@ -298,24 +437,36 @@ def model_posterior(eigs: Float[Array, "k"], xmin: Float[Array, ""] | None = Non
     log_exp = _logev_exponential(eigs, xmin, c0, d0)
     log_ln = _logev_lognormal(eigs, xmin, kappa0, a_ig, b_ig)
 
-    logevs = jnp.stack([log_pl, log_exp, log_ln])
-    probs = jax.nn.softmax(logevs)
     names = ["powerlaw", "exponential", "lognormal"]
-    best = names[int(jnp.argmax(logevs))]
-
-    return {
+    logev_list = [log_pl, log_exp, log_ln]
+    out = {
         "logev_powerlaw": float(log_pl),
         "logev_exponential": float(log_exp),
         "logev_lognormal": float(log_ln),
-        "prob_powerlaw": float(probs[0]),
-        "prob_exponential": float(probs[1]),
-        "prob_lognormal": float(probs[2]),
         "logbf_pl_vs_exp": float(log_pl - log_exp),   # >0 favours power-law
         "logbf_pl_vs_ln": float(log_pl - log_ln),     # >0 favours power-law
-        "best_model": best,
         "xmin": float(xmin),
         "tail_size": int(n),
     }
+    if extended:
+        # truncated power law (WeightWatcher's TPL) + generalized Pareto (EVT). Both
+        # via Laplace; comparable to the conjugate evidences on the same tail data.
+        log_tpl = _logev_tpl(eigs, xmin, a0, b0)
+        log_gpd = _logev_gpd(eigs, xmin)
+        names += ["truncated_powerlaw", "generalized_pareto"]
+        logev_list += [log_tpl, log_gpd]
+        out["logev_truncated_powerlaw"] = float(log_tpl)
+        out["logev_generalized_pareto"] = float(log_gpd)
+        out["logbf_pl_vs_tpl"] = float(log_pl - log_tpl)   # >0 favours plain PL over truncated
+        out["logbf_pl_vs_gpd"] = float(log_pl - log_gpd)
+
+    logevs = jnp.stack(logev_list)
+    probs = jax.nn.softmax(logevs)
+    best = names[int(jnp.argmax(logevs))]
+    for name, p in zip(names, probs):
+        out[f"prob_{name}"] = float(p)
+    out["best_model"] = best
+    return out
 
 
 # --- Phase 4: posterior-predictive check -> Bayesian p-value ------------------
