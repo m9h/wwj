@@ -18,7 +18,8 @@
 \usepackage[capitalize,noabbrev]{cleveref}
 \usepackage{xspace}
 
-\graphicspath{{../figures/}}
+\graphicspath{{figures/}}
+\input{generated_values}  % auto-generated macros (paper/generate.py): every headline number
 
 \title{A Bayesian WeightWatcher: Calibrated Heavy-Tailed\\
 Spectral Diagnostics and What They Overturn}
@@ -210,7 +211,56 @@ modalities. We release \texttt{wwj}/\texttt{wwjd} so that spectral diagnostics c
 
 \appendix
 \section*{\LARGE Supplementary Material}
-% Implementation details, full per-model tables, hyperparameters, and per-layer
-% posterior distributions are provided in the supplementary material.
+
+\section{Reproducibility}
+\label{sec:appendix_repro}
+Every number, table, and figure in \cref{sec:ww_replication} is generated from the
+per-layer analysis CSVs by \texttt{paper/generate.py}, which emits the headline macros
+(\texttt{generated\_values.tex}), the \LaTeX{} tables (\texttt{generated\_tables.tex}), and
+the seaborn figures; \texttt{bash paper/build.sh} reweaves the manuscript from the data.
+The analysis itself is \texttt{benchmarks/ww\_replication.py} (frequentist + Bayesian per
+layer), \texttt{ww\_gpt\_detail.py} (the GPT goodness-of-fit detail), and
+\texttt{ww\_bayes\_diagnostics.py} (EIV, TPL/GPD, ROPE, prior-sensitivity), all on the
+public checkpoints; \texttt{wwj}/\texttt{wwjd} carries a passing test suite.
+
+\section{\texttt{wwjd} Implementation Details}
+\label{sec:appendix_impl}
+The conjugate posterior is exact: writing $t = \log(\lambda / x_{\min})$, the Pareto tail
+becomes $\text{Exp}(\beta)$ with $\beta = \alpha - 1$, and a $\text{Gamma}(a_0, b_0)$ prior
+gives $\beta \mid \text{data} \sim \text{Gamma}(a_0 + n, b_0 + \sum t)$; we use weakly
+informative $a_0 = b_0 = 10^{-3}$ so the flat-prior limit equals the CSN MLE. The BMA over
+$x_{\min}$ weights each candidate window by a base-measure-corrected marginal likelihood and
+reports a within-window/across-window variance split. The truncated-power-law and
+generalized-Pareto evidences use a Newton+Laplace approximation; all other evidences are
+closed form. The hierarchical model is a NumPyro partial-pooling fit; the EIV regression is
+a NumPyro measurement-error model standardized for sampling stability.
+
+\section{GPT Large-$\alpha$ Layer Detail}
+\label{sec:appendix_gptdetail}
+\cref{tab:gpt_detail} lists, for the GPT layers with frequentist $\alpha > 5$, the
+frequentist and posterior $\alpha$ with credible interval, the share of the $\alpha$
+variance attributable to the $x_{\min}$-window choice, the power-law-vs-exponential log
+Bayes factor, and the posterior-predictive $p$-value.
+\begin{table}[h]
+\centering\small
+\caption{GPT (openai-gpt) layers with frequentist $\alpha > 5$. Auto-generated.
+$\alpha_{\rm f}$/$\alpha_{\rm b}$: frequentist/Bayesian exponent; win.var: $x_{\min}$-window
+variance share; logBF$_{\rm exp}$: power-law vs exponential; ppc $p$: posterior-predictive.}
+\label{tab:gpt_detail}
+\wwGptDetailTable
+\end{table}
+
+\section{Neuroimaging Experiment Details}
+\label{sec:appendix_neuro}
+The cross-modality survey covers five checkpoints (BrainIAC and a brain-age fine-tune
+\citep{brainiac2024}; the realtime-MindEye decoder and two per-subject fine-tunes
+\citep{scotti2024realtime}). The cohort sweep uses 20 WAND subjects, TorchIO
+\citep{perezgarcia2021torchio} perturbations (motion, bias field, ghosting, spike, noise) at
+five severities, with relative CLS-embedding drift as the metric and a paired Wilcoxon test
+across 10 perturbation seeds. The MLP ablation trains two 3-hidden-layer MLPs on sklearn
+digits (batch 128, 2000 steps, AdamW $10^{-3}$) differing only in
+\texttt{alpha\_loss}($\lambda = 0.01$, target 2). The pathology intervention applies
+\texttt{alpha\_loss} during continual DINOv2 pretraining of a ViT-S encoder at a
+$10^{18}$-FLOP budget.
 
 \end{document}

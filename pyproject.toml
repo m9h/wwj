@@ -38,6 +38,8 @@ benchmarks = [
     "timm>=1.0",           # for Virchow / Virchow2 / GigaPath via timm.create_model
     "torchvision>=0.15",   # VGG/ResNet/DenseNet ImageNet checkpoints (ww_replication)
     "transformers>=4.30",  # GPT / GPT2 checkpoints (ww_replication)
+    "matplotlib>=3.7",     # paper figures
+    "seaborn>=0.13",       # paper figures (Sweave-style literate doc)
 ]
 
 [tool.hatch.build.targets.wheel]
