@@ -138,5 +138,9 @@ def finetune(epochs: int = 5):
 
 
 @app.local_entrypoint()
-def scratch(epochs: int = 5, neuro_tokenizer: bool = True):
+def scratch(epochs: int = 5, neuro_tokenizer: bool = False):
+    # Default False: prepare() tokenized the corpus with the *gpt2* tokenizer, so a
+    # from-scratch run must reuse it (vocab 50257) to match the cached blocks. The
+    # neuro-tokenizer variant needs a re-tokenization pass first; the transformer-block
+    # weight matrices we analyze are the same shape under either tokenizer regardless.
     _scratch.remote(epochs, neuro_tokenizer)
