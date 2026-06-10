@@ -108,6 +108,36 @@ favor of exponential or lognormal) for $\wwBnRejLo$--$\wwBnRejHi\%$ of layers, r
 depth; plain VGG and all GPT models reject for $0\%$. The frequentist $\alpha$, which never
 tests the power-law assumption, is blind to this structure.
 
+\paragraph{$\alpha$ tracks training \emph{maturity}, not data domain.}
+The frozen-checkpoint results above compare models trained by others. To isolate what
+\emph{training itself} does to the spectrum, we trained GPT-2-124M ourselves on an open
+neuroscience corpus (the 1.3B-token BrainGPT PMC subset) in two regimes and compared the
+spectra to stock GPT-2 (\cref{fig:maturity}). A \emph{gentle domain fine-tune} (the
+pretrained model continued for one epoch, learning rate $2\times10^{-5}$) leaves the
+spectrum essentially untouched: mean posterior $\alpha$ moves from $\wwBgBaseBayes$ to
+$\wwBgFtBayes$ (mean $|\alpha-2|$ identical at $\wwBgBaseDist$). A model trained
+\emph{from scratch} for the same one epoch is markedly less mature: posterior $\alpha =
+\wwBgScratchBayes$ (frequentist $\wwBgScratchFreq$), with mean $|\alpha-2| = \wwBgScratchDist$
+versus $\wwBgBaseDist$ for the pretrained base---the embedding and early attention/MLP
+layers carry the largest gap. A larger $\alpha$ is a \emph{lighter} tail: the heavy-tailed
+structure has not yet formed. Training pulls $\alpha$ down toward the RG-optimal $2$, and
+adaptation of an already-mature model does not move it---so the spectrum reflects \emph{how
+well-trained} a model is rather than \emph{what} it was trained on, a direct controlled
+confirmation of the HT-SR maturity claim. (Notably, even the one-epoch from-scratch model is
+still power-law-distributed: the Bayes factor rejects the power law for $0\%$ of its layers,
+so immaturity manifests as a lighter power-law tail, not as loss of power-law structure.)
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.55\textwidth]{fig_training_maturity.png}
+\caption{Controlled training-maturity test on GPT-2-124M we trained ourselves. A one-epoch
+neuroscience \emph{fine-tune} of stock GPT-2 leaves mean $\alpha$ unchanged (mature spectrum,
+domain adaptation does not reshape it); a one-epoch \emph{from-scratch} model sits well above
+the RG optimum $\alpha=2$ (immature: the heavy tail has not formed). $\alpha$ tracks training
+maturity, not data domain.}
+\label{fig:maturity}
+\end{figure}
+
 \input{generated_tables}
 \begin{table}[t]
 \centering\small

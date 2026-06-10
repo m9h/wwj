@@ -70,6 +70,62 @@ comparable table. Architecture-agnostic: each published checkpoint's *encoder* s
   open extension is to run/obtain those and test whether the gated predictor transfers *across
   objectives* — the spectral side already says capacity vs training coordinates separate cleanly.
 
+## Local HBN-rest downstream mini-study
+
+Since the CortexMAE `eval_v2` task data is R2-gated and peer downstream results aren't
+published anywhere, we built a fresh **local** downstream leaderboard on the Brainmarks
+`hbn-rest` data (`/data/datasets/brainmarks`, n=178 subjects, 5-fold CV balanced-accuracy)
+for the input-space-matched FMs. Harness: `benchmarks/hbn_local_probe.py` (+ `hbn_consolidate.py`).
+This is a *separate* task from `eval_v2`, so it does not join the CortexMAE gated-predictor table.
+
+| model | space | age_bin | sex | α-med | %α<2 | φ₁ | M_tr | traps |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| CortexMAE-parcel-s400ts3 | 457 | 0.354 | 0.521 | 3.01 | 1% | 0.005 | 384 | 0 |
+| CortexMAE-parcel-a424 | 424 | 0.375 | 0.508 | 3.01 | 1% | 0.005 | 384 | 0 |
+| **Brain-Semantoks** | 457 | 0.379 | **0.709** | 3.05 | 31% | 0.010 | 192 | 3 |
+| **NeuroSTORM** | volume-4D | **0.455** | 0.536 | 3.46 | 17% | 0.031 | 57 | 22 |
+| Connectome-FC (baseline) | 457 | 0.435 | 0.580 | — | | | | |
+| Connectome-FC (baseline) | 424 | 0.408 | 0.548 | — | | | | |
+
+*age_bin chance 0.25, sex chance 0.50. Connectome-FC = Pearson functional-connectivity + logistic — the bar an FM must clear. Three input spaces covered: parcel-457, parcel-424, volume-4D.*
+
+![local HBN leaderboard](../../../data/derivatives/peer_fm_ww/results/hbn_probe/hbn_leaderboard.png)
+
+**Findings:**
+1. **Different architectures win different targets — and each beats FC on its strength.**
+   **NeuroSTORM** (whole-brain volume-4D Swin+Mamba) tops **age_bin (0.455)**, the only FM above
+   the FC baseline (0.44) on age. **Brain-Semantoks** (parcel self-distill) tops **sex (0.71)**,
+   the only FM above FC (0.58) on sex. CortexMAE-parcel beats FC on neither (≈chance on sex).
+   No single FM dominates both — input representation + objective matter per task.
+2. **The within-CortexMAE RG coordinates do NOT transfer across architectures — they invert.**
+   The two best-downstream models are the *spectrally "worst"* by the within-CortexMAE
+   self-averaging logic: NeuroSTORM has the **most traps (22)**, highest φ₁ (0.031), lowest M_tr
+   (57); Brain-Semantoks has the highest %α<2 (31%). CortexMAE-parcel is the cleanest spectrum
+   (1% α<2, 0 traps) yet the weakest downstream. So the gated predictor's capacity/training
+   coordinates are **within-family** signals, not a universal cross-architecture quality ranking
+   — exactly the spectral survey's headline (objective/architecture dominates the spectrum→quality map).
+
+**Caveats.** n=178, single site (HBN); only age_bin/sex decodable (p_factor ~chance); 4 FMs is
+too few for a real RG-vs-downstream correlation, so finding (2) is qualitative (but the inversion
+is striking). Embeddings validated faithful by clearing the FC-calibrated floor — two transform
+bugs were caught this way (CortexMAE: the stored bold is per-ROI z-scored, so the real transform
+*denormalizes* then global-z-scores — per-ROI re-normalization gave near-chance; and the parcel
+model expects fewer ROIs than the arrow ships → crop to `img_size`).
+
+**Engineering note — NeuroSTORM on DGX Spark (GB10 / aarch64 / CUDA 13).** NeuroSTORM pins a
+2023 stack (py<3.12, pytorch-lightning==1.9.4, torch 2.6, **mamba-ssm**), but per "containers make
+any env work" we ran it *inside the up-to-date NGC 26.04 container* (torch 2.12 / CUDA 13.2, which
+supports GB10 sm_121) rather than a CPU-only legacy container. Three fixes made it work: (i) the
+"fundamental incompatibility" was actually monai's `torch_tensorrt` optional-import hanging —
+stub `torch_tensorrt` in `sys.modules`; (ii) PL 2.6 turned out compatible with NeuroSTORM's
+LightningModule for construction; (iii) the Swin4D blocks genuinely embed `Mamba` layers, so we
+**built `causal-conv1d` for aarch64/CUDA-13.2/sm_121** (mamba-ssm 2.3.2 itself is JIT via
+tilelang/cutlass, arch-agnostic). The local `mni_cortex` arrow is cortex-only (132k voxels) — wrong
+for NeuroSTORM's whole-brain input — so embeddings were computed from the **raw CPAC MNI BOLD niis**
+(`/data/raw/hbn-cpac`, 91×109×91, brain-mask → 228k voxels). The aarch64 `causal-conv1d` wheel +
+build notes are staged at `/data/derivatives/peer_fm_ww/wheels/` for public release. **BrainLM (a424)
+remains blocked** — its 2024 custom-HF ViTMAE is incompatible with transformers 5.8 (multi-point port).
+
 ## Reproduction
 
 ```bash
@@ -81,9 +137,20 @@ apptainer exec --no-init -B /data:/data -B /home/mhough:/home/mhough \
   python benchmarks/peer_fmri_fm_survey.py
 ```
 
+```bash
+# local HBN downstream probe (parcel-space FMs) + consolidation:
+apptainer exec --no-init --nv -B /data:/data -B /home/mhough:/home/mhough \
+  --env APPTAINERENV_PYTHONPATH=/home/mhough/dev/weightwatcher:/home/mhough/dev/CortexMAE/src:/home/mhough/dev/CortexMAE/scripts:/data/derivatives/peer_fm_ww/Brain-Semantoks \
+  /data/derivatives/containers/pytorch_26.04.sif \
+  python benchmarks/hbn_local_probe.py \
+    --models cortex_mae_parcel_s400ts3 cortex_mae_parcel_a424 brain_semantoks --targets age_bin sex
+python benchmarks/hbn_consolidate.py
+```
+
 Artifacts: `/data/derivatives/peer_fm_ww/results/` — `{model}_details.csv`,
 `{model}_summary.json`, `peer_fms_summary.{csv,json}`, `cross_fm_table.csv`,
-`cross_fm_landscape.png`.
+`cross_fm_landscape.png`, and `hbn_probe/` (`hbn_probe_{model}.json`,
+`hbn_leaderboard_joined.csv`, `hbn_leaderboard.md`, `hbn_leaderboard.png`).
 
 ## fMRI FMs surveyed (Brainmarks registry)
 

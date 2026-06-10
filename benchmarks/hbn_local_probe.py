@@ -102,13 +102,76 @@ def cmae_embed_subject(encoder, args, ex, device):
     return emb.cpu().numpy()
 
 
+# ---------------------------------------------------------------------------
+# NeuroSTORM (volume-4D Swin+Mamba) — reads the raw whole-brain MNI BOLD niis
+# (local CPAC derivatives), since the local arrow is cortex-only (wrong representation).
+# Needs the aarch64 mamba-ssm/causal-conv1d we built; torch_tensorrt stubbed (monai hang).
+# ---------------------------------------------------------------------------
+NSTORM_VENDOR = "/data/derivatives/peer_fm_ww/nstorm_vendor"
+CPAC_ROOT = "/data/raw/hbn-cpac"
+
+
+def build_neurostorm(device, variant="0.8"):
+    import types
+    sys.modules.setdefault("torch_tensorrt", types.ModuleType("torch_tensorrt"))
+    sys.path.insert(0, f"{NSTORM_VENDOR}/bmshim")
+    sys.path.insert(0, NSTORM_VENDOR)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("nstorm", f"{NSTORM_VENDOR}/nstorm.py")
+    ns = importlib.util.module_from_spec(spec); sys.modules["nstorm"] = ns
+    spec.loader.exec_module(ns)
+    wrapper = ns.NeuroStormWrapper(variant=variant).eval().to(device)
+    transform = ns.NeuroStormTransform(coord_normalize=True)  # feed raw MNI bold, skip unnorm
+    return wrapper, transform
+
+
+def build_swift(device):
+    """SwiFT (contrastive Swin4D, no mamba) — same whole-brain MNI / 96^3 volume input as
+    NeuroSTORM, so its embedder reuses neurostorm_embed_subject (generic wrapper+transform)."""
+    import types
+    sys.modules.setdefault("torch_tensorrt", types.ModuleType("torch_tensorrt"))
+    sys.path.insert(0, f"{NSTORM_VENDOR}/bmshim")
+    sys.path.insert(0, NSTORM_VENDOR)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("swiftmod", f"{NSTORM_VENDOR}/swift.py")
+    sw = importlib.util.module_from_spec(spec); sys.modules["swiftmod"] = sw
+    spec.loader.exec_module(sw)
+    ckpt = Path("/data/derivatives/peer_fm_ww/ckpts/swift_contrastive_pretrained.ckpt")  # already downloaded
+    wrapper = sw.SwiftWrapper(ckpt).eval().to(device)
+    transform = sw.SwiftTransform(coord_normalize=True)
+    return wrapper, transform
+
+
+@torch.inference_mode()
+def neurostorm_embed_subject(wrapper, transform, ex, device):
+    import nibabel as nib
+    path = Path(CPAC_ROOT) / ex["path"]
+    if not path.exists():
+        return None
+    img = nib.as_closest_canonical(nib.load(str(path)))   # -> RAS
+    assert img.shape[:3] == (91, 109, 91), f"unexpected {img.shape}"
+    data = np.asarray(img.dataobj, dtype=np.float32)       # (X,Y,Z,T)
+    data = np.ascontiguousarray(data.transpose(3, 2, 1, 0))  # (T,Z,Y,X) like read_mni152_2mm_data
+    mask = transform.mask.cpu().numpy()                    # (Z,Y,X) bool, 228483 True
+    bold = data[:, mask]                                   # (T, V) in mask C-order
+    sample = {"bold": torch.from_numpy(bold), "tr": float(ex["tr"]),
+              "mean": torch.zeros(1, bold.shape[1]), "std": torch.ones(1, bold.shape[1])}
+    sample = transform(sample)                             # -> bold (1, 96,96,96, T)
+    x = sample["bold"].unsqueeze(0).to(device)             # (1,1,96,96,96,T)
+    with torch.autocast("cuda", torch.bfloat16, enabled=str(device).startswith("cuda")):
+        out = wrapper({"bold": x})
+    return out.patch_embeds.float().mean(dim=(0, 1)).cpu().numpy()
+
+
 def load_split_embeddings(embed_fn, arrow_path, split):
     from datasets import load_from_disk
     ds = load_from_disk(arrow_path)[split]
     subs, X = [], []
     for ex in ds:
-        X.append(embed_fn(ex))
-        subs.append(ex["sub"])
+        emb = embed_fn(ex)
+        if emb is None:            # e.g. NeuroSTORM: raw nii not found -> skip subject
+            continue
+        X.append(emb); subs.append(ex["sub"])
     return subs, np.vstack(X)
 
 
@@ -261,6 +324,17 @@ def main():
             enc = build_semantoks(device)
             embed_fn = lambda ex, e=enc: semantoks_embed_subject(e, ex, device)
             results.append(run_model(name, embed_fn, SPACE_ARROW["parcel457"],
+                                     args.targets, out_dir))
+        elif name == "neurostorm":
+            wrap, tfm = build_neurostorm(torch.device(device))
+            embed_fn = lambda ex, w=wrap, t=tfm: neurostorm_embed_subject(w, t, ex, torch.device(device))
+            # iterate the volume arrow for (sub, path, tr); embeddings come from raw niis
+            results.append(run_model(name, embed_fn, SPACE_ARROW["volume"],
+                                     args.targets, out_dir))
+        elif name == "swift":
+            wrap, tfm = build_swift(torch.device(device))
+            embed_fn = lambda ex, w=wrap, t=tfm: neurostorm_embed_subject(w, t, ex, torch.device(device))
+            results.append(run_model(name, embed_fn, SPACE_ARROW["volume"],
                                      args.targets, out_dir))
         else:
             print(f"[skip] no embedder for {name} yet", flush=True)

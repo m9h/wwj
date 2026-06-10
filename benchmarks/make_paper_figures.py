@@ -91,9 +91,34 @@ def fig_mechanism(out: Path):
     fig.savefig(out / "fig_mechanism.png", dpi=170, bbox_inches="tight"); plt.close(fig)
 
 
+def fig_training_maturity(out: Path):
+    """Three-regime: base GPT-2 vs 1-epoch neuroscience fine-tune vs 1-epoch from-scratch.
+    alpha tracks training maturity (scratch far from 2) not data domain (fine-tune inert)."""
+    bg = Path("/data/mhough/wwj_braingpt/braingpt_summary.csv")
+    if not bg.exists():
+        return
+    s = pd.read_csv(bg).set_index("model")
+    order = ["base", "finetune", "scratch"]
+    labels = ["base GPT-2\n(mature)", "+ neuro\nfine-tune", "neuro\nfrom-scratch"]
+    bars = pd.DataFrame({"x": labels * 2,
+                         "alpha": [s.loc[m, "mean_alpha_freq"] for m in order] +
+                                  [s.loc[m, "mean_alpha_bayes"] for m in order],
+                         "estimator": ["frequentist"] * 3 + ["Bayesian"] * 3})
+    fig, ax = plt.subplots(figsize=(5.2, 3.6))
+    sns.barplot(bars, x="x", y="alpha", hue="estimator",
+                palette={"frequentist": "#bbbbbb", "Bayesian": "#1f77b4"}, ax=ax)
+    ax.axhline(2.0, color="green", lw=0.9, ls=":")
+    ax.text(2.4, 2.05, r"RG optimum $\alpha=2$", color="green", fontsize=8, va="bottom", ha="right")
+    ax.set(xlabel=None, ylabel=r"mean $\alpha$",
+           title=r"$\alpha$ tracks training maturity, not domain")
+    ax.legend(fontsize=8, title=None, loc="upper left")
+    sns.despine(fig); fig.tight_layout()
+    fig.savefig(out / "fig_training_maturity.png", dpi=170, bbox_inches="tight"); plt.close(fig)
+
+
 def make_all(out: Path):
     out.mkdir(parents=True, exist_ok=True)
-    fig_gpt_dissolution(out); fig_vgg_eiv(out); fig_mechanism(out)
+    fig_gpt_dissolution(out); fig_vgg_eiv(out); fig_mechanism(out); fig_training_maturity(out)
 
 
 if __name__ == "__main__":

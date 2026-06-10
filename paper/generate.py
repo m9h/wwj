@@ -69,6 +69,14 @@ def values_tex() -> str:
     out.append(_m("wwGptXminShareHi", f"{int(big['xmin_var_share'].max()*100)}"))
     out.append(_m("wwGptRopeN", f"{int((bd['prob_in_rope2']>0.5).sum())}"))
     out.append(_m("wwGptPriorSens", f"{bd['prior_sens'].mean():.3f}"))
+    # BrainGPT three-regime training-maturity result (if the run is present)
+    bgp = DATA.parent / "wwj_braingpt" / "braingpt_summary.csv"
+    if bgp.exists():
+        bg = pd.read_csv(bgp).set_index("model")
+        for m, tag in [("base", "Base"), ("finetune", "Ft"), ("scratch", "Scratch")]:
+            out.append(_m(f"wwBg{tag}Freq", f"{bg.loc[m,'mean_alpha_freq']:.2f}"))
+            out.append(_m(f"wwBg{tag}Bayes", f"{bg.loc[m,'mean_alpha_bayes']:.2f}"))
+            out.append(_m(f"wwBg{tag}Dist", f"{bg.loc[m,'mean_absdist2_bayes']:.2f}"))
     return "".join(out)
 
 

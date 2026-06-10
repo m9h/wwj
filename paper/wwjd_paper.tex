@@ -47,7 +47,10 @@ marginalized (mean $\alpha$ $4.12 \to 2.90$ for GPT, the GPT--GPT2 gap shrinking
 with two independent goodness-of-fit tests contradicting the ``not a power law'' mechanism and
 showing the inflation is truncated-power-law mis-specification; the flagship VGG accuracy trend
 is confirmed and \emph{sharpened} under the posterior ($r{=}{-}0.77 \to {-}0.98$); and batch
-normalization breaks the power law in $8$--$17\%$ of layers, invisible to the point estimate. We
+normalization breaks the power law in $8$--$17\%$ of layers, invisible to the point estimate. Training
+GPT-2 ourselves, we further isolate that $\alpha$ tracks training \emph{maturity}, not data domain: a
+one-epoch domain fine-tune leaves the spectrum untouched while a one-epoch from-scratch model sits far from
+$\alpha=2$ (heavy tail not yet formed). We
 then apply the same diagnostics across modalities, where the $\alpha = 2$ robustness prediction
 holds for physics-realistic neuroimaging perturbations but fails to transfer to a foundation-model-scale
 pathology intervention. We release \texttt{wwj} as an open tool for uncertainty-aware spectral diagnostics.

@@ -21,6 +21,8 @@ MODELS = {
     "cortex_mae_parcel_s400ts3": (f"{CMAE}/cortex_mae_parcel_s400ts3_summary.json", "457", "CortexMAE"),
     "cortex_mae_parcel_a424":    (f"{CMAE}/cortex_mae_parcel_a424_summary.json",    "424", "CortexMAE"),
     "brain_semantoks":           (f"{PEER}/brain_semantoks_summary.json",           "457", "Brain-Semantoks"),
+    "neurostorm":                (f"{PEER}/neurostorm_summary.json",                "volume", "NeuroSTORM"),
+    "swift":                     (f"{PEER}/swift_summary.json",                     "volume", "SwiFT"),
 }
 
 
