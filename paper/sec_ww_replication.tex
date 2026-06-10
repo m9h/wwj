@@ -1,0 +1,98 @@
+% ============================================================================
+% Section: Validation on WeightWatcher's canonical cases
+% Drop-in for the restructured paper (Section 3). Uses \texttt{wwj}/\texttt{wwjd}
+% as defined in the Method section. Figures/tables reference data in
+% /data/mhough/wwj_ww_replication (per-layer CSVs + summary).
+% ============================================================================
+\section{Validation on WeightWatcher's Own Canonical Cases}
+\label{sec:ww_replication}
+
+Before applying the Bayesian diagnostics to new modalities, we test them where the
+answer is already published: on the exact pretrained checkpoints Martin \& Mahoney
+used to establish heavy-tailed self-regularization. We load each model from its public
+source (torchvision ImageNet weights; HuggingFace GPT/GPT2), extract every 2D weight
+matrix with $\min(\text{shape}) \geq 50$, and compute both the frequentist
+WeightWatcher point estimate and the \texttt{wwjd} posterior. Three findings result.
+
+\paragraph{The VGG weighted-$\alpha$ trend is confirmed---and sharper under the posterior.}
+WeightWatcher's flagship claim is that the weighted-alpha
+$\hat\alpha = \text{mean}_\ell\, \alpha_\ell \log_{10}\lambda_{\max,\ell}$ tracks test
+accuracy across the VGG11/13/16/19 ($\pm$BN) ImageNet series. We reproduce this with the
+frequentist point estimate (Pearson $r = -0.77$ between $\hat\alpha$ and top-1 accuracy)
+and find the \emph{Bayesian} $\hat\alpha$ (posterior-mean per layer) tracks accuracy
+\emph{more} strongly, $r = -0.98$. The Bayesian model-averaging over $x_{\min}$ pulls down
+the inflated large-$\alpha$ layers (see below), making the metric more predictive, not less.
+We note that the metric must be the per-layer \emph{mean}: the unweighted mean $\alpha$ gives
+$r = +0.89$ (the wrong sign---a depth-confounded Simpson's paradox), which the weighting
+corrects, and which the posterior recovers cleanly.
+
+We close the loop with an errors-in-variables regression of accuracy on $\hat\alpha$ that
+propagates the per-model $\hat\alpha$ posterior uncertainty (\cref{sec:method}). The posterior
+slope is $-6.2$ percentage points of top-1 accuracy per unit $\hat\alpha$
+(95\% credible interval $[-7.8, -4.8]$, $P(\text{slope} < 0) = 1.00$), with residual
+$\sigma = 0.31$pp: the weights-only spectrum predicts ImageNet top-1 to within a third of a
+point. The measurement-error slope is slightly steeper than the naive ordinary-least-squares
+slope ($-6.0$), the expected attenuation correction. This turns WeightWatcher's reported
+correlation into a calibrated predictor with honest prediction intervals.
+
+\paragraph{The ``GPT2 is better-trained than GPT'' gap largely dissolves under $x_{\min}$ marginalization.}
+The canonical NLP example holds that GPT is poorly trained because it has ``numerous unusually
+large $\alpha$'' layers, while GPT2-small has all $\alpha \leq 6$. Under the frequentist
+single-$x_{\min}$ estimate we reproduce this: mean $\alpha = 4.12$ for GPT versus $3.62$ for
+GPT2 and $3.70$ for GPT2-medium. Under the \texttt{wwjd} posterior that marginalizes over the
+scaling window, all three collapse into one healthy band: $2.90$, $2.73$, $2.75$ respectively.
+The frequentist gap (GPT $-$ GPT2 $= 0.50$) shrinks roughly threefold to $0.16$. Per layer,
+GPT's nine $768\times768$ attention-projection matrices fall from frequentist $\alpha \in
+[5.2, 6.9]$ to posterior $\alpha \in [2.8, 3.5]$. The shift is not an artifact of our estimator:
+$18$--$36\%$ of the per-layer $\alpha$ variance on these layers is attributable to the
+$x_{\min}$-window choice alone (the law-of-total-variance decomposition of the posterior),
+exactly the degree of freedom the single KS-optimal window collapses.
+
+Two independent goodness-of-fit tests then contradict the ``not well-described by a power law''
+mechanism on these same layers. The Bayesian model comparison prefers a power law over both
+exponential (log Bayes factor $+120$ to $+163$) and lognormal ($+24$ to $+35$) tails, and the
+posterior-predictive $p$-values are all comfortably above $0.05$ ($0.26$--$0.68$): the power-law
+fit is adequate in absolute terms. When we extend the comparison set to the truncated power law
+(the model WeightWatcher itself ships because plain power-law fits over-estimate $\alpha$) and
+the generalized Pareto (the extreme-value-theory peaks-over-threshold tail), the truncated power
+law beats the plain one on all $50$ GPT layers (mean log Bayes factor $-1.54$). The ``large
+$\alpha$'' is therefore a power-law-\emph{with-truncation} mis-specification, made explicit:
+when the finite-size cutoff is modeled, the inflation disappears. A region-of-practical-equivalence
+test keeps this honest---only $1/50$ GPT layers place majority posterior mass in $\alpha \in
+[1.75, 2.25]$, so the Bayesian $\alpha \approx 2.9$ is far below the frequentist $4.1$ but still
+above the RG-ideal $2.0$. A power-scaling prior-sensitivity diagnostic confirms the conclusions
+are not prior-driven (mean sensitivity $0.001$ posterior-SD units).
+
+\paragraph{Batch normalization breaks the power law in a way the point estimate hides.}
+Across the BatchNorm VGG variants, the Bayesian model comparison rejects the power law (in favor
+of exponential or lognormal) for $8$--$17\%$ of layers, rising with depth (vgg19\_bn: $17\%$);
+plain VGG and all GPT models reject for $0\%$. The frequentist $\alpha$, which never tests the
+power-law assumption, is blind to this structure.
+
+\cref{tab:ww_replication} summarizes. The unifying mechanism across both image and language
+models is that the frequentist single-window estimate inflates $\alpha$ on hard-to-fit layers,
+and the larger the frequentist $\alpha$, the larger the posterior correction; clean low-$\alpha$
+layers barely move. This is the over-estimation Martin acknowledges as the reason for the
+truncated-power-law option---here quantified, calibrated, and shown to change a published
+conclusion.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Bayesian reanalysis of WeightWatcher's canonical checkpoints. $\hat\alpha$/$\alpha$
+columns are weighted-/mean-alpha; ``freq'' is the single-$x_{\min}$ WeightWatcher estimate,
+``bayes'' the \texttt{wwjd} posterior (BMA over $x_{\min}$). PL-rej.\ = fraction of layers the
+Bayes factor rejects as non-power-law.}
+\label{tab:ww_replication}
+\begin{tabular}{lcccc}
+\toprule
+Model & mean $\alpha$ (freq) & mean $\alpha$ (bayes) & PL-rej.\ & note \\
+\midrule
+openai-gpt   & 4.12 & 2.90 & 0\%  & ``poorly trained'' (freq) $\to$ healthy (bayes) \\
+gpt2         & 3.62 & 2.73 & 0\%  & gap to GPT shrinks $3\times$ \\
+gpt2-medium  & 3.70 & 2.75 & 0\%  & \\
+vgg19        & 2.71 & 2.42 & 0\%  & $\hat\alpha$ vs acc: $r_{\text{freq}}{=}{-}0.77$ \\
+vgg19\_bn    & 2.93 & 2.42 & 17\% & $\hat\alpha$ vs acc: $r_{\text{bayes}}{=}{-}0.98$ \\
+\bottomrule
+\end{tabular}
+\end{table}
