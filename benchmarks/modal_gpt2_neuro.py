@@ -29,7 +29,7 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install(
         "torch==2.8.0",
-        "transformers>=4.44",
+        "transformers>=4.44,<5.0",   # 5.x dropped TrainingArguments args; 4.x matches the recipe
         "datasets>=2.20",
         "accelerate>=0.33",
         "tokenizers>=0.19",
@@ -104,7 +104,7 @@ def _train(mode: str, epochs: int, neuro_tokenizer: bool):
         model = GPT2LMHeadModel(cfg)
 
     args = TrainingArguments(
-        output_dir=out, overwrite_output_dir=True,
+        output_dir=out,
         per_device_train_batch_size=16, gradient_accumulation_steps=8,
         num_train_epochs=epochs, learning_rate=2e-5, weight_decay=1e-3,
         warmup_ratio=0.03, lr_scheduler_type="cosine",
