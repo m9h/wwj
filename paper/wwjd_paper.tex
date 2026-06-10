@@ -1,0 +1,216 @@
+\documentclass{article} % For LaTeX2e
+\usepackage{iclr2025,times}
+
+\input{math_commands.tex}
+
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{graphicx}
+\usepackage{subfigure}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+\usepackage{multirow}
+\usepackage{color}
+\usepackage{colortbl}
+\usepackage[capitalize,noabbrev]{cleveref}
+\usepackage{xspace}
+
+\graphicspath{{../figures/}}
+
+\title{A Bayesian WeightWatcher: Calibrated Heavy-Tailed\\
+Spectral Diagnostics and What They Overturn}
+
+\author{Anonymous}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Heavy-Tailed Self-Regularization (HTSR) reads the quality of a trained neural network
+off the eigenvalue spectrum of its weight matrices: the power-law tail exponent $\alpha$
+is a label-free generalization proxy, and Martin's renormalization-group theory sharpens
+this into the prediction that $\alpha = 2$ is a robustness-optimal fixed point. The reference
+tool, WeightWatcher, reports $\alpha$ as a single point estimate from one Kolmogorov--Smirnov
+scaling window, and never tests whether a layer is a power law at all. We show this matters.
+We introduce \texttt{wwj}/\texttt{wwjd}, a JAX/Equinox reimplementation that adds a calibrated
+Bayesian layer: a closed-form Gamma--Pareto posterior over $\alpha$, Bayesian model averaging
+over the scaling window, Bayesian model comparison against exponential, lognormal, truncated
+power-law, and generalized-Pareto tails, posterior-predictive checks, a hierarchical
+cross-layer posterior, and an errors-in-variables regression that turns $\alpha$ into a
+calibrated accuracy predictor. Reanalyzing WeightWatcher's own canonical checkpoints, we find:
+the famous ``GPT2 is better trained than GPT'' gap largely dissolves once the scaling window is
+marginalized (mean $\alpha$ $4.12 \to 2.90$ for GPT, the GPT--GPT2 gap shrinking threefold),
+with two independent goodness-of-fit tests contradicting the ``not a power law'' mechanism and
+showing the inflation is truncated-power-law mis-specification; the flagship VGG accuracy trend
+is confirmed and \emph{sharpened} under the posterior ($r{=}{-}0.77 \to {-}0.98$); and batch
+normalization breaks the power law in $8$--$17\%$ of layers, invisible to the point estimate. We
+then apply the same diagnostics across modalities, where the $\alpha = 2$ robustness prediction
+holds for physics-realistic neuroimaging perturbations but fails to transfer to a foundation-model-scale
+pathology intervention. We release \texttt{wwj} as an open tool for uncertainty-aware spectral diagnostics.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+The Heavy-Tailed Self-Regularization (HTSR) framework \citep{martin2021implicit,martin2019traditional}
+observes that the empirical spectral density (ESD) of weight matrices in well-trained deep networks
+develops a heavy, approximately power-law tail $p(\lambda) \propto \lambda^{-\alpha}$, and that the
+exponent $\alpha$ predicts generalization across hundreds of pretrained models with no access to data
+or labels \citep{martin2021predicting}. Martin's renormalization-group (RG) theory of learning
+\citep{martin2026rg} and its semi-empirical successor \citep{martin2025setol} sharpen this into a
+quantitative claim: $\alpha = 2$ is a critical fixed point, and proximity to it should confer robustness.
+
+These are strong, falsifiable claims, and they rest entirely on how $\alpha$ is estimated. The reference
+tool, WeightWatcher, fits $\alpha$ by maximum likelihood on the tail above a single scaling-window lower
+bound $x_{\min}$ chosen to minimize a Kolmogorov--Smirnov (KS) distance, and reports a per-layer point
+value. This pipeline has two well-known soft spots that the authors themselves flag: the MLE ``works
+very well for $\alpha \in (2,4)$\ldots adequate, although imprecise, for smaller and especially larger
+$\alpha$'' \citep{martin2021predicting}, and the KS objective sometimes has no well-defined minimum in
+$x_{\min}$ \citep{martin2021postmortem}; the tool ships a truncated-power-law option precisely because
+plain power-law fits over-estimate $\alpha$. Yet downstream conclusions---``this model is poorly trained
+because it has unusually large $\alpha$,'' ``this layer is ideal because $\alpha \approx 2$''---are read
+off the point estimate as if it carried no uncertainty, and the power-law assumption underlying $\alpha$
+is never tested.
+
+We argue that a Bayesian treatment is not a cosmetic addition but changes published conclusions. We
+introduce \texttt{wwj}, a JAX/Equinox \citep{jax2018,kidger2021equinox} reimplementation of WeightWatcher,
+and \texttt{wwjd}, a Bayesian layer on top of it (\cref{sec:method}): a closed-form conjugate posterior
+over $\alpha$, Bayesian model averaging (BMA) over $x_{\min}$, Bayesian model comparison that adds the
+truncated power law and the extreme-value generalized Pareto to the usual exponential/lognormal
+alternatives, posterior-predictive goodness-of-fit, a hierarchical cross-layer population posterior, and
+an errors-in-variables (EIV) regression that propagates $\alpha$ uncertainty into a calibrated accuracy
+predictor, together with region-of-practical-equivalence and prior-sensitivity diagnostics.
+
+Our contributions are: (1) the \texttt{wwj}/\texttt{wwjd} tool, including exact CSN $x_{\min}$ selection
+\citep{clauset2009powerlaw}, a differentiable Hill estimator enabling direct spectral regularization, and
+the Bayesian model-criticism suite; (2) a reanalysis of WeightWatcher's own canonical checkpoints
+(\cref{sec:ww_replication}) showing that the GPT/GPT2 ``training quality'' gap is largely a
+scaling-window artifact, that the flagship VGG accuracy trend strengthens under the posterior, and that
+batch normalization silently breaks the power law; and (3) a cross-modality application
+(\cref{sec:crossmodality}) where the $\alpha = 2$ robustness prediction holds for realistic neuroimaging
+perturbations but does not transfer to a pathology foundation-model intervention---an honest map of where
+the theory does and does not pay off.
+
+\section{Related Work}
+\label{sec:related}
+
+\textbf{HTSR and spectral quality metrics.} \citet{martin2021implicit,martin2019traditional} established
+heavy-tailed weight spectra and the ``5+1 phases'' of training; \citet{martin2021predicting} showed
+$\alpha$ predicts test-accuracy trends without data. The capacity metric is the weighted alpha
+$\hat\alpha = \text{mean}_\ell \alpha_\ell \log_{10}\lambda_{\max,\ell}$. The RG grounding is
+\citet{martin2026rg,martin2025setol}; the contest post-mortem \citep{martin2021postmortem} documents a
+Simpson's paradox between shape ($\alpha$) and scale metrics. All of these read $\alpha$ as a point
+estimate; we put a posterior on it.
+
+\textbf{Power-law fitting and its critique.} The CSN MLE-plus-KS procedure \citep{clauset2009powerlaw}
+and the \texttt{powerlaw} package \citep{alstott2014powerlaw} underlie HTSR fitting. The statistical
+risks---$x_{\min}$ instability, alternative heavy-tailed distributions, finite-size truncation---are
+well documented, and motivate Bayesian model averaging over $x_{\min}$, model comparison, and the
+truncated power law and generalized Pareto from extreme-value theory \citep{coles2001evt} that we add.
+
+\textbf{Bayesian workflow and model criticism.} Power-scaling prior-sensitivity
+\citep{kallioinen2023priorsense} and predictive model comparison \citep{vehtari2017practical} are
+standard tools for trustworthy Bayesian conclusions; we adapt them to spectral diagnostics.
+
+\textbf{Spectral shaping and robustness.} The Muon optimizer \citep{jordan2024muon} is conjectured to
+shape spectra toward the RG optimum; our differentiable \texttt{alpha\_loss} is a direct,
+optimizer-agnostic alternative. For the cross-modality application we use TorchIO
+\citep{perezgarcia2021torchio} perturbations, the MONAI \citep{cardoso2022monai} ViT, and the BrainIAC
+\citep{brainiac2024} and MindEye \citep{scotti2024realtime} checkpoints.
+
+\section{Method: \texttt{wwj} and \texttt{wwjd}}
+\label{sec:method}
+
+\textbf{Frequentist core (\texttt{wwj}).} For each 2D weight matrix $W$ with $\min(\text{shape}) \geq 50$
+we compute the eigenvalues of $W^\top W / N$ and select $x_{\min}$ by exhaustive KS minimization over
+every eigenvalue as a candidate (matching CSN 2009, rather than the reference's log-spaced grid). A
+differentiable Hill estimator $\hat\alpha = 1 + n(\sum_i \log \lambda_i / x_{\min})^{-1}$ backpropagates
+through \texttt{eigvalsh}, enabling the regularizer $\mathcal{L}_\alpha = \lambda_{\text{reg}}
+\cdot \text{mean}_\ell(\hat\alpha_\ell - 2)^2$. A Vuong likelihood-ratio test compares power-law against
+exponential and lognormal tails.
+
+\textbf{Bayesian layer (\texttt{wwjd}).} The tail above $x_{\min}$ is Pareto, so $t = \log(\lambda/x_{\min})$
+is exponential with rate $\beta = \alpha - 1$, and a conjugate $\text{Gamma}(a_0, b_0)$ prior on $\beta$
+yields the closed-form posterior $\beta \mid \text{data} \sim \text{Gamma}(a_0 + n, b_0 + \sum t)$. Hence
+the posterior mean, credible interval, and $P(\alpha < 2)$ are exact, and the flat-prior limit recovers the
+CSN MLE. On top of this single-window posterior we build: (i) \emph{BMA over $x_{\min}$}, a Gamma mixture
+weighting each candidate window by a comparable marginal likelihood, with a law-of-total-variance
+decomposition that separates within-window from window-choice uncertainty; (ii) \emph{Bayesian model
+comparison} with analytic evidences for power-law/exponential/lognormal and Laplace evidences for the
+truncated power law and generalized Pareto; (iii) a \emph{posterior-predictive $p$-value} from Lomax
+replication; (iv) a \emph{hierarchical} NumPyro population posterior over per-layer $\alpha$ with shrinkage;
+(v) an \emph{errors-in-variables regression} of a downstream metric on $\hat\alpha$ that propagates the
+$\hat\alpha$ posterior SD as measurement error; and (vi) \emph{ROPE} ($P(\alpha \in [2-\delta, 2+\delta])$)
+and \emph{power-scaling prior-sensitivity} diagnostics. The conjugate per-layer surfaces are pure JAX; only
+the hierarchical model samples.
+
+\input{sec_ww_replication}
+
+\section{Cross-Modality Application: Where $\alpha = 2$ Pays Off, and Where It Does Not}
+\label{sec:crossmodality}
+
+The reanalysis above validates the diagnostics on models with known answers. We now turn them on the
+open question: does proximity to $\alpha = 2$ actually confer robustness, across modalities? We summarize
+a positive neuroimaging result and a negative foundation-model-scale pathology result.
+
+\textbf{Neuroimaging (positive, partial).} A cross-modality survey of five neuroimaging checkpoints places
+the BrainIAC lineage near the RG optimum (mean $|\alpha-2| \in \{0.12, 0.40\}$) and the MindEye lineage far
+from it ($\{3.49, 4.73\}$); the Vuong/Bayesian comparison formally rejects the power law for the MindEye
+per-subject layers with $\alpha \in [8,11]$, a silent failure of bare $\alpha$ reporting. In a paired cohort
+sweep over 20 WAND subjects under TorchIO perturbations, the spectrally-closer checkpoint shows
+$3\times$ lower CLS-embedding drift under bias field (Wilcoxon $p = 0.00022$, $9/10$ perturbation seeds
+$p < 0.05$), with the effect concentrated in smooth, physics-realistic perturbations (bias field, motion)
+and absent for high-frequency artifacts (spike, noise)---the pattern the RG theory predicts. A controlled
+MLP ablation confirms the causal direction: \texttt{alpha\_loss} drives mean $\alpha$ to $2.00$ within 1000
+steps and uniformly improves noise robustness.
+
+\textbf{Pathology (negative).} The same \texttt{alpha\_loss} regularizer, applied at foundation-model scale
+during continual DINOv2 pretraining of a ViT-S pathology encoder ($10^{18}$-FLOP budget), is
+robustness-\emph{neutral}: pulling backbone weight-matrix $\alpha$ toward 2 leaves the downstream
+robustness probe unchanged and the mean probe score statistically indistinguishable from the unregularized
+recipe. The MLP-scale robustness gain does not transfer to a real foundation model in this modality. We
+report this as an honest boundary on the $\alpha = 2$ prediction: the diagnostic value of $\alpha$ (and of
+the Bayesian corrections above) is robust, but the \emph{interventional} robustness payoff is
+scale- and modality-dependent.
+
+\section{Discussion}
+\label{sec:discussion}
+
+A single thread runs through the reanalysis: the frequentist single-window estimate inflates $\alpha$ on
+hard-to-fit layers, and the larger the frequentist $\alpha$, the larger the posterior correction, because
+those are exactly the layers where the scaling window is ambiguous (a large share of their $\alpha$
+variance is the window choice) and where the plain power law is mis-specified relative to a truncated one.
+Clean, near-optimal layers barely move. This is why a published conclusion built on large point-$\alpha$
+layers---``GPT is poorly trained''---can weaken or dissolve under marginalization, while a conclusion built
+on the depth trend of well-behaved layers---the VGG accuracy relationship---survives and even sharpens.
+The practical recommendation is to report $\alpha$ with a credible interval, a power-law validity check,
+and, where the conclusion is comparative, the window-choice variance share; \texttt{wwjd} makes all three
+one function call.
+
+\textbf{Limitations.} The Laplace evidences for the truncated power law and generalized Pareto are
+approximations; the cross-modality negative result is a single intervention; and the neuroimaging positive
+result, while controlled, spans one architecture family. Predictive model comparison (PSIS-LOO) and a
+mixture model separating the Marchenko--Pastur bulk from the heavy tail are natural next additions.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+Heavy-tailed self-regularization is a powerful, falsifiable theory, and exactly because it is falsifiable
+it deserves uncertainty-aware estimation. We showed that a calibrated Bayesian treatment of the power-law
+exponent---posteriors, window marginalization, model comparison, and goodness-of-fit---changes conclusions
+drawn from the reference tool on its own canonical examples, turns the quality metric into a calibrated
+accuracy predictor, and draws an honest map of where the $\alpha = 2$ robustness prediction transfers across
+modalities. We release \texttt{wwj}/\texttt{wwjd} so that spectral diagnostics can be reported with error bars.
+
+\bibliography{references}
+\bibliographystyle{iclr2025}
+
+\appendix
+\section*{\LARGE Supplementary Material}
+% Implementation details, full per-model tables, hyperparameters, and per-layer
+% posterior distributions are provided in the supplementary material.
+
+\end{document}
