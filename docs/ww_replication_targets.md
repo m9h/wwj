@@ -118,6 +118,32 @@ Bayesian model comparison (model_posterior) sees structure the point-α is blind
 Data: /data/mhough/wwj_ww_replication/ (per-layer CSVs + summary). A zero-eigenvalue
 BMA NaN bug was caught + fixed on VGG16 during this run (commit 76380dd).
 
+## Bayesian-workflow diagnostics applied (2026-06-09, benchmarks/ww_bayes_diagnostics.py)
+
+**#1 EIV regression — VGG α̂ is a CALIBRATED predictor of accuracy.** Errors-in-variables
+regression of ImageNet top-1 on α̂ (Bayesian α̂ + propagated per-model SE): posterior
+slope **−6.21 pp per unit α̂, 95% CI [−7.76, −4.84], P(slope<0)=1.000**, residual σ=0.31pp,
+R-hat 1.0. The measurement-error slope (−6.21) is slightly steeper than naive OLS (−6.04) —
+attenuation-corrected as expected. So the weights-only spectrum predicts ImageNet top-1 to
+within ~0.3 points, with the HT-SR direction certain. Turns Charles's point correlation into
+a predictive instrument with honest uncertainty.
+
+**#2 TPL/GPD — the GPT "large α" is power-law-WITH-truncation mis-specification.** Adding the
+truncated power law (WW's own TPL) and the generalized Pareto (EVT) to the comparison: across
+all 50 openai-gpt layers, **the plain power law loses to the truncated power law 50/50**
+(mean logBF PL-vs-TPL = −1.54), and the 5-way best model is GPD (35) or TPL (15) — never plain
+PL. So the layers ARE heavy-tailed (PL beats exp/lognormal in the 3-way), but a *truncated*
+power law fits better — which is exactly why plain-PL α is over-estimated (the finite-size
+cutoff WW's TPL option exists for). This is the mechanism behind the freq-4.1 → bayes-2.9
+correction, made explicit.
+
+**#6 ROPE — but GPT is still ABOVE the RG optimum.** Only 1/50 GPT layers have posterior mass
+P(α ∈ [1.75,2.25]) > 0.5 (mean 0.023). So the Bayesian α≈2.9 is much lower than the freq 4.1
+but still not at the SETOL-ideal α=2 — honest nuance, not an over-correction.
+
+**#5 Prior sensitivity — conclusions are not prior-driven.** Mean power-scaling sensitivity
+across GPT layers = 0.001 posterior-SD units (≈0). The findings are robust to the prior.
+
 ## Open questions (next runs)
 - DenseNet α~8 layers (#2 shortlist) — the clearest formal PL-rejection target, untested.
 - PGDL within-subgroup anti-correlation under a hierarchical posterior (#3 shortlist).
