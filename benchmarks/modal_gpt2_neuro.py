@@ -65,14 +65,18 @@ def prepare():
 
     for split in ds:
         t = ds[split].map(tok_fn, batched=True, remove_columns=ds[split].column_names, num_proc=16)
-        t = t.map(group, batched=True, num_proc=16)
+        # remove_columns drops the stale per-doc input_ids/attention_mask so only the new
+        # fixed-length 1024-token blocks remain (else Arrow sees mismatched column lengths).
+        t = t.map(group, batched=True, num_proc=16, remove_columns=t.column_names)
         t.save_to_disk(f"{VOL}/tok_gpt2/{split}")
         print(f"[prep] {split}: {len(t)} blocks of {SEQ} tokens", flush=True)
 
     # GPT2-Neuro tokenizer (BPE retrained on the corpus) for the from-scratch variant
     base = AutoTokenizer.from_pretrained("gpt2")
-    neuro = base.train_new_from_iterator((ds["train"][i][text_col] for i in range(len(ds["train"]))),
-                                         vocab_size=base.vocab_size)
+    def text_iter(bs=1000):
+        for i in range(0, len(ds["train"]), bs):
+            yield ds["train"][i:i + bs][text_col]
+    neuro = base.train_new_from_iterator(text_iter(), vocab_size=base.vocab_size)
     neuro.save_pretrained(f"{VOL}/gpt2_neuro_tokenizer")
     vol.commit()
     print("[prep] done: tokenized blocks + neuro tokenizer committed to volume", flush=True)
