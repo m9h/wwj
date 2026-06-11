@@ -144,3 +144,138 @@ def scratch(epochs: int = 5, neuro_tokenizer: bool = False):
     # neuro-tokenizer variant needs a re-tokenization pass first; the transformer-block
     # weight matrices we analyze are the same shape under either tokenizer regardless.
     _scratch.remote(epochs, neuro_tokenizer)
+
+
+# ===========================================================================
+# alpha-trajectory sweep: trace alpha(step) emergence as GPT-2 trains from
+# scratch. Unlike the 3-regime study (which froze the lr=2e-5 fine-tune recipe
+# to isolate init), this run uses a proper from-scratch recipe (lr 6e-4 cosine,
+# beta2=0.95, wd=0.1) so the heavy tail actually forms, and saves dense
+# model-only checkpoints (step-0 random-init anchor through a log-spaced
+# schedule). wwjd is then run over every checkpoint to give alpha(step),
+# |alpha-2|(step), and the power-law-rejection fraction(step) -- the spectrum
+# starts Marchenko-Pastur (random, PL-rejected) and the heavy tail emerges.
+#
+# TRAIN:    modal run --detach modal_gpt2_neuro.py::scratch_traj            # 1 epoch
+# ANALYZE:  modal run modal_gpt2_neuro.py::analyze_traj                     # CPU wwjd sweep
+# ===========================================================================
+
+ANALYZE_IMAGE = (
+    modal.Image.debian_slim(python_version="3.12")
+    .apt_install("git")                               # for pip install from the wwj git URL
+    .pip_install(
+        "torch==2.8.0",
+        "transformers>=4.44,<5.0",
+        "pandas>=2.0",
+        "wwj @ git+https://github.com/m9h/wwj.git",   # CPU jax; conjugate BMA needs no extras
+    )
+)
+
+
+def _save_points(total_steps: int):
+    """Log-spaced checkpoint schedule: dense early (alpha moves fastest as the heavy
+    tail first forms), sparser late. Step 0 (random init) is saved separately."""
+    early = [50, 100, 200, 350, 500, 750, 1000, 1500, 2000]
+    late = list(range(3000, total_steps, 1000))
+    return sorted({p for p in early + late if 0 < p < total_steps})
+
+
+@app.function(image=image, gpu=GPU, volumes={VOL: vol}, timeout=24 * 3600)
+def _scratch_traj(epochs: int = 1, lr: float = 6e-4):
+    import os, json, math
+    from datasets import load_from_disk
+    from transformers import (GPT2LMHeadModel, GPT2Config, Trainer, TrainingArguments,
+                              TrainerCallback, default_data_collator)
+
+    out = f"{VOL}/exp/scratch_traj_ep{epochs}"
+    os.makedirs(out, exist_ok=True)
+    train = load_from_disk(f"{VOL}/tok_gpt2/train")
+
+    cfg = GPT2Config.from_pretrained("gpt2")
+    model = GPT2LMHeadModel(cfg)
+
+    bs, ga = 16, 8
+    total_steps = math.ceil(len(train) / (bs * ga)) * epochs
+    save_pts = set(_save_points(total_steps))
+    model.save_pretrained(f"{out}/step0")          # random-init anchor (MP spectrum)
+
+    class SpectralCkpt(TrainerCallback):
+        def on_step_end(self, args, state, control, model=None, **kw):
+            if state.global_step in save_pts:
+                model.save_pretrained(f"{out}/step{state.global_step}")
+                vol.commit()
+            return control
+
+    args = TrainingArguments(
+        output_dir=out,
+        per_device_train_batch_size=bs, gradient_accumulation_steps=ga,
+        num_train_epochs=epochs, learning_rate=lr, weight_decay=0.1,
+        adam_beta2=0.95, max_grad_norm=1.0,
+        warmup_steps=min(500, total_steps // 20), lr_scheduler_type="cosine",
+        bf16=True, logging_steps=50, save_strategy="no", eval_strategy="no", report_to=[],
+    )
+    trainer = Trainer(model=model, args=args, train_dataset=train,
+                      data_collator=default_data_collator, callbacks=[SpectralCkpt()])
+    print(f"[traj] from-scratch lr={lr} epochs={epochs} steps={total_steps} "
+          f"tokens/step={bs*ga*SEQ} save_pts={sorted(save_pts)}", flush=True)
+    trainer.train()
+    model.save_pretrained(f"{out}/step{trainer.state.global_step}")
+    json.dump(trainer.state.log_history, open(f"{out}/log_history.json", "w"))
+    vol.commit()
+    print(f"[traj] done -> {out} ({len(save_pts)+2} spectral checkpoints)", flush=True)
+
+
+@app.function(image=ANALYZE_IMAGE, volumes={VOL: vol}, cpu=8, memory=32768, timeout=6 * 3600)
+def _analyze_traj(epochs: int = 1):
+    import os, re
+    import numpy as np, pandas as pd, jax.numpy as jnp
+    import wwj
+    from wwj.core import _eigvals
+    from transformers import AutoModel
+
+    exp = f"{VOL}/exp/scratch_traj_ep{epochs}"
+    ckpts = sorted([d for d in os.listdir(exp) if re.fullmatch(r"step\d+", d)],
+                   key=lambda d: int(d[4:]))
+
+    def mats(path, min_dim=50):
+        m = AutoModel.from_pretrained(path).eval(); o = {}
+        for nm, p in m.named_parameters():
+            if nm.endswith("weight") and p.ndim >= 2:
+                W = p.detach().float().numpy().reshape(p.shape[0], -1)
+                if min(W.shape) >= min_dim:
+                    o[nm] = W.astype(np.float32)
+        return o
+
+    summ, layers = [], []
+    for d in ckpts:
+        step = int(d[4:]); af, ab, plr = [], [], []
+        for nm, W in mats(f"{exp}/{d}").items():
+            e = _eigvals(jnp.asarray(W))
+            a_f = float(wwj.analyze_matrix(jnp.asarray(W), mode="csn").alpha)
+            a_b = wwj.alpha_posterior_bma(e)["alpha_mean"]
+            rej = wwj.model_posterior(e)["best_model"] != "powerlaw"
+            af.append(a_f); ab.append(a_b); plr.append(rej)
+            layers.append({"step": step, "layer": nm, "alpha_freq": a_f, "alpha_bayes": a_b})
+        af, ab = np.array(af), np.array(ab)
+        summ.append({"step": step, "n_layers": len(af),
+                     "mean_alpha_freq": float(np.nanmean(af)),
+                     "mean_alpha_bayes": float(np.nanmean(ab)),
+                     "mean_absdist2_bayes": float(np.nanmean(np.abs(ab - 2))),
+                     "frac_pl_rejected": float(np.mean(plr))})
+        print(f"[traj] step {step:>6}: bayes_alpha={summ[-1]['mean_alpha_bayes']:.3f} "
+              f"|a-2|={summ[-1]['mean_absdist2_bayes']:.3f} "
+              f"PLrej={summ[-1]['frac_pl_rejected']:.2f}", flush=True)
+    pd.DataFrame(summ).to_csv(f"{exp}/traj_summary.csv", index=False)
+    pd.DataFrame(layers).to_csv(f"{exp}/traj_layers.csv", index=False)
+    vol.commit()
+    print(f"[traj] wrote {exp}/traj_summary.csv ({len(summ)} checkpoints)", flush=True)
+
+
+@app.local_entrypoint()
+def scratch_traj(epochs: int = 1, lr: float = 6e-4):
+    _scratch_traj.remote(epochs, lr)
+
+
+@app.local_entrypoint()
+def analyze_traj(epochs: int = 1):
+    _analyze_traj.remote(epochs)

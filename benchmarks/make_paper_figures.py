@@ -116,9 +116,76 @@ def fig_training_maturity(out: Path):
     fig.savefig(out / "fig_training_maturity.png", dpi=170, bbox_inches="tight"); plt.close(fig)
 
 
+_LAYER_TYPE = [
+    ("wte.weight", "token embed", "#9467bd"),
+    ("wpe.weight", "pos embed", "#8c564b"),
+    ("attn.c_attn", "attn QKV", "#1f77b4"),
+    ("attn.c_proj", "attn out-proj", "#17becf"),
+    ("mlp.c_fc", "MLP in", "#ff7f0e"),
+    ("mlp.c_proj", "MLP out-proj", "#2ca02c"),
+]
+
+
+def _traj_type(name: str) -> str:
+    for key, lab, _ in _LAYER_TYPE:
+        if key in name:
+            return lab
+    return "other"
+
+
+def fig_alpha_trajectory(out: Path):
+    """alpha(step) as GPT-2-124M trains from scratch (lr 6e-4 cosine). Left: the Bayesian
+    alpha of every layer type descends from the random-init (Marchenko-Pastur) light tail
+    toward the RG optimum 2 -- token embeddings start lightest (alpha=6.1) and travel
+    farthest, output projections form their heavy tail first. The thick line is the mean.
+    Right: the frequentist single-KS-window inflation (freq-bayes pull-down) collapses from
+    7.5 at random init to ~0.7 as the scaling window stabilises -- the paper's mechanism
+    traced through training time."""
+    summ = Path("/data/mhough/wwj_traj/traj_summary.csv")
+    lay = Path("/data/mhough/wwj_traj/traj_layers.csv")
+    if not (summ.exists() and lay.exists()):
+        return
+    s = pd.read_csv(summ).sort_values("step").reset_index(drop=True)
+    L = pd.read_csv(lay)
+    L["t"] = L["layer"].map(_traj_type)
+    piv = L.pivot_table(index="step", columns="t", values="alpha_bayes", aggfunc="mean").sort_index()
+    xs = lambda v: np.where(np.asarray(v) == 0, 0.7, v)   # log-axis: step 0 (init) -> 0.7
+    ticks = [0.7, 10, 100, 1000, 8837]
+    tlabs = ["init", "10", "100", "1k", "8.8k"]
+
+    def _xfmt(ax):
+        ax.set_xscale("log"); ax.set_xlim(0.55, 1.3e4)
+        ax.set_xticks(ticks); ax.set_xticklabels(tlabs)
+        ax.set_xlabel("training step (log; 0 = random init)")
+
+    fig, (axA, axB) = plt.subplots(1, 2, figsize=(8.6, 3.5))
+    for key, lab, c in _LAYER_TYPE:
+        if lab in piv.columns:
+            axA.plot(xs(piv.index), piv[lab], "-", color=c, lw=1.3, alpha=0.9, label=lab)
+    axA.plot(xs(s["step"]), s["mean_alpha_bayes"], "k-", lw=2.4, label="mean", zorder=5)
+    axA.axhline(2.0, color="green", lw=0.9, ls=":")
+    axA.text(8837, 2.02, r"RG optimum $\alpha=2$", color="green",
+             fontsize=7.5, va="bottom", ha="right")
+    _xfmt(axA)
+    axA.set(ylabel=r"Bayesian $\alpha$", title=r"Heavy tail forms layer-by-layer ($\alpha\!\to\!2$)")
+    axA.legend(fontsize=7, ncol=2, title=None, loc="upper right")
+
+    pull = s["mean_alpha_freq"] - s["mean_alpha_bayes"]
+    axB.plot(xs(s["step"]), pull, "o-", color="#d62728", ms=4, lw=1.6)
+    axB.axhline(0, color="k", lw=0.7)
+    axB.annotate(f"init: {pull.iloc[0]:.1f}", (0.7, pull.iloc[0]),
+                 fontsize=7.5, xytext=(6, -3), textcoords="offset points")
+    _xfmt(axB)
+    axB.set(ylabel=r"single-window inflation  $\alpha_{\rm freq}-\alpha_{\rm bayes}$",
+            title="Frequentist inflation collapses as spectrum matures")
+    sns.despine(fig); fig.tight_layout()
+    fig.savefig(out / "fig_alpha_trajectory.png", dpi=170, bbox_inches="tight"); plt.close(fig)
+
+
 def make_all(out: Path):
     out.mkdir(parents=True, exist_ok=True)
-    fig_gpt_dissolution(out); fig_vgg_eiv(out); fig_mechanism(out); fig_training_maturity(out)
+    fig_gpt_dissolution(out); fig_vgg_eiv(out); fig_mechanism(out)
+    fig_training_maturity(out); fig_alpha_trajectory(out)
 
 
 if __name__ == "__main__":

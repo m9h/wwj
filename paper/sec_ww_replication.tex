@@ -138,6 +138,41 @@ maturity, not data domain.}
 \label{fig:maturity}
 \end{figure}
 
+\paragraph{Watching the heavy tail form: the $\alpha$ trajectory.}
+The from-scratch checkpoint above is a single immature snapshot because its learning rate
+($2\times10^{-5}$) was held to the fine-tune recipe. To resolve the \emph{dynamics}, we trained
+a second GPT-2-124M from scratch with a proper from-scratch schedule (learning rate
+$6\times10^{-4}$ cosine, $\beta_2=0.95$, weight decay $0.1$), saving $17$ checkpoints on a
+log-spaced schedule from random initialization to step $\wwTrajSteps$ (one epoch), and ran
+\texttt{wwjd} on every checkpoint (\cref{fig:traj}). The mean posterior $\alpha$ falls from
+$\wwTrajInitBayes$ at random initialization to $\wwTrajMinBayes$ by step $\wwTrajMinStep$---most
+of the descent is complete within the first $\sim$15\% of one epoch---then relaxes to
+$\wwTrajFinalBayes$, essentially the stock-GPT-2 value ($\wwGptTwoBayes$): with a real learning
+rate, one epoch \emph{does} reach maturity. The heavy tail forms layer-by-layer, with structure:
+token embeddings start lightest ($\alpha=6.1$, nearest to pure noise) and travel farthest, while
+the attention and MLP \emph{output} projections form their heavy tail first, undershooting
+$\alpha<2.3$ near step $500$ before relaxing back toward the band. The frequentist single-window
+estimate tells the same story far more crudely: it starts at $\wwTrajInitFreq$, because the
+random-init Marchenko--Pastur bulk has no power-law tail and so no stable scaling window for a
+single KS-optimal $x_{\min}$ to find. The resulting posterior pull-down is $\wwTrajInitPull$ at
+initialization and collapses to $\wwTrajFinalPull$ as the spectrum matures (\cref{fig:traj},
+right)---the identical mechanism as the frozen-checkpoint plot (\cref{fig:mech}), now resolved in
+training time: the single-window estimate is least trustworthy exactly where the scaling window is
+least defined, and the Bayesian treatment is most needed there.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\textwidth]{fig_alpha_trajectory.png}
+\caption{The HT-SR power law forming during training (GPT-2-124M from scratch, lr
+$6\times10^{-4}$, one epoch, \texttt{wwjd} on $17$ checkpoints). \textbf{Left:} the Bayesian
+$\alpha$ of each layer type descends from the random-init light tail toward the RG optimum
+$\alpha=2$; thick line is the mean ($\wwTrajInitBayes\!\to\!\wwTrajFinalBayes$). Token embeddings
+travel farthest; output projections mature first. \textbf{Right:} the frequentist single-window
+inflation ($\alpha_{\rm freq}-\alpha_{\rm bayes}$) collapses from $\wwTrajInitPull$ at random
+initialization to $\wwTrajFinalPull$---the \cref{fig:mech} mechanism in training time.}
+\label{fig:traj}
+\end{figure}
+
 \input{generated_tables}
 \begin{table}[t]
 \centering\small

@@ -77,6 +77,19 @@ def values_tex() -> str:
             out.append(_m(f"wwBg{tag}Freq", f"{bg.loc[m,'mean_alpha_freq']:.2f}"))
             out.append(_m(f"wwBg{tag}Bayes", f"{bg.loc[m,'mean_alpha_bayes']:.2f}"))
             out.append(_m(f"wwBg{tag}Dist", f"{bg.loc[m,'mean_absdist2_bayes']:.2f}"))
+    # alpha-trajectory: from-scratch GPT-2-124M emergence (if the sweep is present)
+    tp = DATA.parent / "wwj_traj" / "traj_summary.csv"
+    if tp.exists():
+        t = pd.read_csv(tp).sort_values("step").reset_index(drop=True)
+        imin = int(t["mean_alpha_bayes"].idxmin())
+        out.append(_m("wwTrajInitBayes", f"{t['mean_alpha_bayes'].iloc[0]:.2f}"))
+        out.append(_m("wwTrajInitFreq", f"{t['mean_alpha_freq'].iloc[0]:.1f}"))
+        out.append(_m("wwTrajMinBayes", f"{t['mean_alpha_bayes'].min():.2f}"))
+        out.append(_m("wwTrajMinStep", f"{int(t['step'].iloc[imin])}"))
+        out.append(_m("wwTrajFinalBayes", f"{t['mean_alpha_bayes'].iloc[-1]:.2f}"))
+        out.append(_m("wwTrajSteps", f"{int(t['step'].iloc[-1])}"))
+        out.append(_m("wwTrajInitPull", f"{t['mean_alpha_freq'].iloc[0]-t['mean_alpha_bayes'].iloc[0]:.1f}"))
+        out.append(_m("wwTrajFinalPull", f"{t['mean_alpha_freq'].iloc[-1]-t['mean_alpha_bayes'].iloc[-1]:.1f}"))
     return "".join(out)
 
 
