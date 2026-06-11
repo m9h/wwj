@@ -21,7 +21,7 @@ import jax.numpy as jnp
 from jax.scipy.special import gammainc, gammaln, ndtri
 from jaxtyping import Array, Float
 
-from wwj.core import _ks_select_xmin, _eigvals, _hill_alpha, _walk_matrices, _EIG_RTOL
+from wwj.core import _ks_select_xmin, _eigvals, _hill_alpha, _walk_matrices, _EIG_RTOL, _n_meaningful
 
 
 def _gammaincinv(a: Float[Array, ""], q: Float[Array, ""],
@@ -545,6 +545,8 @@ class BayesLayerStats:
     xmin: float                # MAP scaling window
     tail_size: int
     ppc_pvalue: float | None   # posterior-predictive p-value (None unless ppc=True)
+    degenerate: bool = False   # too few meaningful eigenvalues for a fittable tail
+                               # (near-dead/low-rank layer); alpha fields are nan
 
 
 def bayes_analyze_matrix(W: Float[Array, "n m"], name: str = "",
@@ -553,6 +555,16 @@ def bayes_analyze_matrix(W: Float[Array, "n m"], name: str = "",
     """Bayesian per-matrix record: BMA alpha posterior + model comparison, with an
     optional posterior-predictive check (off by default -- it samples)."""
     eigs = _eigvals(W)
+    nm = int(_n_meaningful(eigs))
+    if nm < min_tail_size:
+        # No fittable heavy tail (near-dead / low-rank). Flag + nan instead of fitting
+        # a spurious alpha to numerical-zero eigenvalues -- matches the degeneracy guard
+        # in core.bootstrap_alpha_ci / fit_distributions (the Bayesian path lacked it).
+        nan = float("nan")
+        return BayesLayerStats(name=name, alpha_mean=nan, alpha_std=nan, ci_low=nan,
+                               ci_high=nan, p_alpha_lt_2=nan, best_model="degenerate",
+                               prob_powerlaw=nan, xmin=nan, tail_size=nm, ppc_pvalue=None,
+                               degenerate=True)
     bma = alpha_posterior_bma(eigs, min_tail_size=min_tail_size)
     mp = model_posterior(eigs)
     pv = ppc_pvalue(eigs, key=key)["p_value"] if ppc else None
@@ -582,17 +594,26 @@ def bayes_summary(stats: list[BayesLayerStats]) -> dict:
     """Aggregate Bayesian per-layer stats into a population diagnostic line."""
     if not stats:
         return {"n_layers": 0}
-    means = jnp.array([s.alpha_mean for s in stats])
+    # Aggregate over FIT layers only; degenerate (near-dead) layers have nan alpha and
+    # would poison the means. Their count is reported, never silently dropped.
+    fit = [s for s in stats if not s.degenerate]
+    n_degenerate = len(stats) - len(fit)
+    if not fit:
+        return {"n_layers": len(stats), "n_fit": 0, "n_degenerate": n_degenerate,
+                "alpha_mean": float("nan")}
+    means = jnp.array([s.alpha_mean for s in fit])
     return {
         "n_layers": len(stats),
+        "n_fit": len(fit),
+        "n_degenerate": n_degenerate,
         "alpha_mean": float(jnp.mean(means)),
         "alpha_median": float(jnp.median(means)),
         "alpha_dist_mean": float(jnp.mean(jnp.abs(means - 2.0))),
-        "mean_posterior_std": float(jnp.mean(jnp.array([s.alpha_std for s in stats]))),
-        "mean_p_alpha_lt_2": float(jnp.mean(jnp.array([s.p_alpha_lt_2 for s in stats]))),
+        "mean_posterior_std": float(jnp.mean(jnp.array([s.alpha_std for s in fit]))),
+        "mean_p_alpha_lt_2": float(jnp.mean(jnp.array([s.p_alpha_lt_2 for s in fit]))),
         "frac_powerlaw_best": float(jnp.mean(jnp.array(
-            [1.0 if s.best_model == "powerlaw" else 0.0 for s in stats]))),
-        "mean_prob_powerlaw": float(jnp.mean(jnp.array([s.prob_powerlaw for s in stats]))),
+            [1.0 if s.best_model == "powerlaw" else 0.0 for s in fit]))),
+        "mean_prob_powerlaw": float(jnp.mean(jnp.array([s.prob_powerlaw for s in fit]))),
     }
 
 
