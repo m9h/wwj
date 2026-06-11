@@ -33,6 +33,7 @@ image = (
         "datasets>=2.20",
         "accelerate>=0.33",
         "tokenizers>=0.19",
+        "trackio",                   # live experiment tracking (opt-in via track=True)
     )
 )
 
@@ -226,14 +227,14 @@ def _scratch_traj(epochs: int = 1, lr: float = 6e-4):
 
 
 @app.function(image=ANALYZE_IMAGE, volumes={VOL: vol}, cpu=8, memory=32768, timeout=6 * 3600)
-def _analyze_traj(epochs: int = 1):
+def _analyze_traj(tag: str = "scratch_traj_ep1"):
     import os, re
     import numpy as np, pandas as pd, jax.numpy as jnp
     import wwj
     from wwj.core import _eigvals
     from transformers import AutoModel
 
-    exp = f"{VOL}/exp/scratch_traj_ep{epochs}"
+    exp = f"{VOL}/exp/{tag}"
     ckpts = sorted([d for d in os.listdir(exp) if re.fullmatch(r"step\d+", d)],
                    key=lambda d: int(d[4:]))
 
@@ -277,5 +278,136 @@ def scratch_traj(epochs: int = 1, lr: float = 6e-4):
 
 
 @app.local_entrypoint()
-def analyze_traj(epochs: int = 1):
-    _analyze_traj.remote(epochs)
+def analyze_traj(tag: str = "scratch_traj_ep1"):
+    _analyze_traj.remote(tag)
+
+
+# ===========================================================================
+# CAUSAL intervention: re-run the from-scratch trajectory WITH the differentiable
+# alpha->2 regularizer (wwj.alpha_loss, ported to torch) added to the loss, vs a
+# seed-matched baseline (identical init + data order, regularizer the only difference).
+# Tests whether pushing the weight spectrum toward alpha=2 makes circuits form EARLIER
+# (heavy tail = enabling cause) or manufactures the spectral signature WITHOUT the
+# circuit (Goodhart -- alpha is only a readout). Analyse each arm with the same
+# analyze_traj + benchmarks/circuit_trajectory.py.
+#
+#   modal run --detach modal_gpt2_neuro.py::scratch_traj_reg --tag areg_base --alpha-reg 0.0
+#   modal run --detach modal_gpt2_neuro.py::scratch_traj_reg --tag areg_a2   --alpha-reg 1.0
+# ===========================================================================
+
+def _train_traj_reg(epochs, lr, alpha_reg, alpha_warmup, seed, tag, track=False, space_id=None):
+    import os, json, math
+    import torch
+    from datasets import load_from_disk
+    from transformers import (GPT2LMHeadModel, GPT2Config, Trainer, TrainingArguments,
+                              TrainerCallback, set_seed, default_data_collator)
+
+    # Differentiable alpha->2 penalty (mirrors benchmarks/alpha_reg.py: a torch port of
+    # wwj.core._hill_alpha / _eigvals; smaller-side Gram eigvalsh -- NOT svdvals(W), which
+    # hits cuSOLVER's slow tall-matrix path on the 50257x768 embedding (~20 s/step); fp32).
+    def hill_alpha(W, frac=0.5, eps=1e-12):
+        n, m = W.shape[0], W.shape[1]; N = float(max(n, m))
+        X = (W.t() @ W) / N if n >= m else (W @ W.t()) / N
+        lam = torch.linalg.eigvalsh(X.float()).flip(0).clamp_min(0.0)
+        k = max(1, int(lam.shape[0] * frac)); top = lam[:k]
+        xmin = top[-1].clamp_min(eps)
+        denom = torch.log(top.clamp_min(eps) / xmin).sum().clamp_min(eps)
+        return 1.0 + k / denom
+
+    def alpha_penalty(model, target=2.0, frac=0.5, min_dim=50):
+        base = model.transformer
+        with torch.autocast(device_type="cuda", enabled=False):
+            terms = [(hill_alpha(p.reshape(p.shape[0], -1), frac) - target) ** 2
+                     for nm, p in base.named_parameters()
+                     if nm.endswith("weight") and p.ndim >= 2
+                     and min(p.shape[0], p.numel() // p.shape[0]) >= min_dim]
+        return torch.stack(terms).mean()
+
+    set_seed(seed)                                     # identical init + data order across arms
+    out = f"{VOL}/exp/{tag}"; os.makedirs(out, exist_ok=True)
+    train = load_from_disk(f"{VOL}/tok_gpt2/train")
+    cfg = GPT2Config.from_pretrained("gpt2"); model = GPT2LMHeadModel(cfg)
+    bs, ga = 16, 8
+    total_steps = math.ceil(len(train) / (bs * ga)) * epochs
+    save_pts = set(_save_points(total_steps))
+    model.save_pretrained(f"{out}/step0")
+
+    class SpectralCkpt(TrainerCallback):
+        def on_step_end(self, args, state, control, model=None, **kw):
+            if state.global_step in save_pts:
+                model.save_pretrained(f"{out}/step{state.global_step}"); vol.commit()
+            return control
+
+    class AlphaRegTrainer(Trainer):
+        # Delegate the LM loss to the parent so HF's num_items_in_batch / grad-accum
+        # scaling is exactly preserved (else the logged loss/gradient is ga x too large);
+        # only ADD the penalty, divided by ga so it sums to lambda*pen per optimizer step.
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            loss, o = super().compute_loss(model, inputs, return_outputs=True,
+                                           num_items_in_batch=num_items_in_batch)
+            if alpha_reg > 0:
+                pen = alpha_penalty(model)
+                ramp = min(1.0, self.state.global_step / max(1, alpha_warmup))
+                loss = loss + (alpha_reg * ramp / self.args.gradient_accumulation_steps) * pen
+                self._pen = float(pen.detach())
+            else:
+                with torch.no_grad():
+                    self._pen = float(alpha_penalty(model))   # logged for comparison only
+            return (loss, o) if return_outputs else loss
+        def log(self, logs, *a, **k):
+            if hasattr(self, "_pen"):
+                logs["alpha_penalty"] = self._pen
+            return super().log(logs, *a, **k)
+
+    args = TrainingArguments(
+        output_dir=out, seed=seed,
+        per_device_train_batch_size=bs, gradient_accumulation_steps=ga,
+        num_train_epochs=epochs, learning_rate=lr, weight_decay=0.1,
+        adam_beta2=0.95, max_grad_norm=1.0,
+        warmup_steps=min(500, total_steps // 20), lr_scheduler_type="cosine",
+        bf16=True, logging_steps=50, save_strategy="no", eval_strategy="no", report_to=[],
+    )
+    # Live experiment tracking (opt-in): stream loss/lr/grad_norm/alpha_penalty to trackio.
+    # Persists to the volume (or syncs to a HF Space via space_id); the spectral/circuit
+    # metrics that need post-hoc forward passes are added later by trackio_backfill.py.
+    class TrackioCallback(TrainerCallback):
+        def on_train_begin(self, a, s, c, **kw):
+            import trackio
+            os.environ.setdefault("TRACKIO_DIR", f"{VOL}/trackio")
+            self.t = trackio
+            trackio.init(project="wwjd-htsr", name=tag,
+                         group="areg" if alpha_reg > 0 else "baseline", space_id=space_id,
+                         config={"tag": tag, "alpha_reg": alpha_reg, "lr": lr, "seed": seed,
+                                 "wd": 0.1, "beta2": 0.95, "warmup": alpha_warmup})
+        def on_log(self, a, s, c, logs=None, **kw):
+            if logs and hasattr(self, "t"):
+                self.t.log({(k if "/" in k else f"train/{k}"): v for k, v in logs.items()
+                            if isinstance(v, (int, float))}, step=s.global_step)
+        def on_train_end(self, a, s, c, **kw):
+            if hasattr(self, "t"):
+                self.t.finish(); vol.commit()
+
+    callbacks = [SpectralCkpt()] + ([TrackioCallback()] if track else [])
+    trainer = AlphaRegTrainer(model=model, args=args, train_dataset=train,
+                              data_collator=default_data_collator, callbacks=callbacks)
+    print(f"[areg] tag={tag} alpha_reg={alpha_reg} warmup={alpha_warmup} seed={seed} "
+          f"lr={lr} steps={total_steps} track={track} save_pts={sorted(save_pts)}", flush=True)
+    trainer.train()
+    model.save_pretrained(f"{out}/step{trainer.state.global_step}")
+    json.dump(trainer.state.log_history, open(f"{out}/log_history.json", "w"))
+    vol.commit()
+    print(f"[areg] done -> {out}", flush=True)
+
+
+@app.function(image=image, gpu=GPU, volumes={VOL: vol}, timeout=24 * 3600)
+def _scratch_traj_reg(epochs: int = 1, lr: float = 6e-4, alpha_reg: float = 0.0,
+                      alpha_warmup: int = 200, seed: int = 42, tag: str = "areg_base",
+                      track: bool = False, space_id: str = None):
+    _train_traj_reg(epochs, lr, alpha_reg, alpha_warmup, seed, tag, track, space_id)
+
+
+@app.local_entrypoint()
+def scratch_traj_reg(epochs: int = 1, lr: float = 6e-4, alpha_reg: float = 0.0,
+                     alpha_warmup: int = 200, seed: int = 42, tag: str = "areg_base",
+                     track: bool = False, space_id: str = None):
+    _scratch_traj_reg.remote(epochs, lr, alpha_reg, alpha_warmup, seed, tag, track, space_id)

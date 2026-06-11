@@ -40,6 +40,7 @@ benchmarks = [
     "transformers>=4.30",  # GPT / GPT2 checkpoints (ww_replication)
     "matplotlib>=3.7",     # paper figures
     "seaborn>=0.13",       # paper figures (Sweave-style literate doc)
+    "trackio>=0.2",        # experiment tracking / dashboard (benchmarks/trackio_backfill.py)
 ]
 
 [tool.hatch.build.targets.wheel]

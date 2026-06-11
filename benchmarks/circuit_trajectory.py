@@ -11,17 +11,21 @@ For each of the 17 log-spaced checkpoints (step 0 = random init -> step 8837 = o
 
 Pairs with traj_summary.csv / traj_layers.csv (the alpha curves) for fig_circuit_trajectory.
 
-Usage: uv run --extra benchmarks python benchmarks/circuit_trajectory.py
+Usage: uv run --extra benchmarks python benchmarks/circuit_trajectory.py [CKPT_DIR] [OUT_DIR]
+       (defaults to the baseline trajectory; pass the areg_base / areg_a2 dirs for the
+        causal-intervention arms, writing <tag>_circuit_*.csv into OUT_DIR)
 """
 import re
+import sys
 from pathlib import Path
 import numpy as np
 import pandas as pd
 from transformers import GPT2LMHeadModel
 import circuit_metrics as cm
 
-CKPTS = Path("/data/mhough/wwj_traj/ckpts/scratch_traj_ep1")
-OUT = Path("/data/mhough/wwj_traj")
+CKPTS = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/data/mhough/wwj_traj/ckpts/scratch_traj_ep1")
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("/data/mhough/wwj_traj")
+PREFIX = sys.argv[3] + "_" if len(sys.argv) > 3 else ""   # e.g. "areg_a2_" to tag the CSVs
 K_SUB = 8          # top-k singular subspace tracked for "freezing"
 IND_THRESH = 0.3   # an "induction head" for the head-count summary
 
@@ -73,10 +77,11 @@ def main():
               f"drift={summ[-1]['mean_subspace_drift']:.3f}", flush=True)
         del model
 
-    pd.DataFrame(summ).to_csv(OUT / "circuit_summary.csv", index=False)
-    pd.DataFrame(heads).to_csv(OUT / "circuit_heads.csv", index=False)
-    pd.DataFrame(layers).to_csv(OUT / "circuit_layers.csv", index=False)
-    print(f"\n[circ] wrote {OUT}/circuit_summary.csv (+heads,+layers)")
+    OUT.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(summ).to_csv(OUT / f"{PREFIX}circuit_summary.csv", index=False)
+    pd.DataFrame(heads).to_csv(OUT / f"{PREFIX}circuit_heads.csv", index=False)
+    pd.DataFrame(layers).to_csv(OUT / f"{PREFIX}circuit_layers.csv", index=False)
+    print(f"\n[circ] wrote {OUT}/{PREFIX}circuit_summary.csv (+heads,+layers)")
 
 
 if __name__ == "__main__":
