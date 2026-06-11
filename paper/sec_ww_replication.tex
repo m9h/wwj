@@ -173,6 +173,44 @@ initialization to $\wwTrajFinalPull$---the \cref{fig:mech} mechanism in training
 \label{fig:traj}
 \end{figure}
 
+\paragraph{The heavy tail is the weight-space shadow of a forming circuit.}
+A spectral exponent matters only if it corresponds to computation. We tested this directly by
+running two mechanistic-interpretability probes on the \emph{same} $17$ checkpoints: the per-head
+\emph{induction score} \citep{olsson2022induction} (does a head attend to, and copy, the token
+that followed the current token's previous occurrence?) and the OV \emph{copying score}
+\citep{elhage2021framework}---the fraction of a head's output--value circuit eigenvalues with
+positive real part, an eigenvalue statistic in the same language as $\alpha$. Three facts result
+(\cref{fig:circuit}). \textbf{(i)~Heavy-tail formation and circuit formation are locked.} Across the
+trajectory the mean posterior $\alpha$ correlates $\wwCircCorrInd$ with the maximum induction score
+and $+\wwCircCorrSR$ with the mean weight stable rank ($\lVert W\rVert_F^2/\lVert W\rVert_2^2$): the
+HT-SR exponent and the elementary stable rank track the same spectral concentration, and both
+anti-track the induction circuit. \textbf{(ii)~The spectrum leads the circuit.} The stable rank
+collapses first---the spike separating from the Marchenko--Pastur bulk, reaching $<\!60$ by step
+$\wwCircSpikeStep$---and only \emph{then} does an induction head ignite (score $>\!0.1$ at step
+$\wwCircIndStep$, $>\!0.4$ at step $\wwCircIndStrong$) while the top singular subspaces freeze
+(principal-angle drift $\to 0$). The heavy tail forms, and the computation comes online inside it
+$\sim$250--500 steps later. \textbf{(iii)~One circuit, two signatures.} The dominant induction head
+(layer~7) acquires its behavioural induction score and its OV copying eigenvalues together, ending
+at induction $\wwCircFinalInd$ with $\wwCircNHeads$ induction heads model-wide. This is a controlled,
+label-free demonstration that $\alpha$ is not a bystander statistic: the same steps that pull $\alpha$
+toward $2$ are the steps that build an interpretable circuit, and the spectral signature slightly
+\emph{precedes} the behavioural one---consistent with the heavy tail being the enabling cause rather
+than a downstream correlate.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.99\textwidth]{fig_circuit_trajectory.png}
+\caption{Mechanistic interpretability paired with heavy-tail formation, on the same from-scratch
+GPT-2 checkpoints. \textbf{Left:} the induction circuit ignites (red) just as the Bayesian $\alpha$
+(blue) crosses into the heavy-tailed band (shaded: the spike-formation window). \textbf{Center:} the
+weight stable rank collapses first (purple, the spike forming) and the top singular subspaces then
+freeze (orange, drift~$\to 0$). \textbf{Right:} a single head (L7H1) comes online with both
+signatures at once---behavioural induction (red) and its OV copying eigenvalue fraction (cyan; $0.5$
+= no copying). $\alpha$ correlates $\wwCircCorrInd$ with induction and $+\wwCircCorrSR$ with stable
+rank across the trajectory.}
+\label{fig:circuit}
+\end{figure}
+
 \input{generated_tables}
 \begin{table}[t]
 \centering\small

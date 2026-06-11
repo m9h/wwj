@@ -90,6 +90,23 @@ def values_tex() -> str:
         out.append(_m("wwTrajSteps", f"{int(t['step'].iloc[-1])}"))
         out.append(_m("wwTrajInitPull", f"{t['mean_alpha_freq'].iloc[0]-t['mean_alpha_bayes'].iloc[0]:.1f}"))
         out.append(_m("wwTrajFinalPull", f"{t['mean_alpha_freq'].iloc[-1]-t['mean_alpha_bayes'].iloc[-1]:.1f}"))
+        # circuit-formation probes on the same checkpoints (induction + OV copying)
+        cp = DATA.parent / "wwj_traj" / "circuit_summary.csv"
+        if cp.exists():
+            c = pd.read_csv(cp).sort_values("step").reset_index(drop=True)
+            mg = c.merge(t[["step", "mean_alpha_bayes"]], on="step")
+            cind = np.corrcoef(mg["mean_alpha_bayes"], mg["max_induction"])[0, 1]
+            csr = np.corrcoef(mg["mean_alpha_bayes"], mg["mean_stable_rank"])[0, 1]
+            spike = int(c[c["mean_stable_rank"] < 60]["step"].iloc[0])
+            ind1 = int(c[c["max_induction"] > 0.1]["step"].iloc[0])
+            ind4 = int(c[c["max_induction"] > 0.4]["step"].iloc[0])
+            out.append(_m("wwCircCorrInd", f"{cind:+.2f}"))
+            out.append(_m("wwCircCorrSR", f"{csr:.2f}"))
+            out.append(_m("wwCircSpikeStep", f"{spike}"))
+            out.append(_m("wwCircIndStep", f"{ind1}"))
+            out.append(_m("wwCircIndStrong", f"{ind4}"))
+            out.append(_m("wwCircFinalInd", f"{c['max_induction'].iloc[-1]:.2f}"))
+            out.append(_m("wwCircNHeads", f"{int(c['n_induction_heads'].iloc[-1])}"))
     return "".join(out)
 
 

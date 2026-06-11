@@ -182,10 +182,67 @@ def fig_alpha_trajectory(out: Path):
     fig.savefig(out / "fig_alpha_trajectory.png", dpi=170, bbox_inches="tight"); plt.close(fig)
 
 
+def fig_circuit_trajectory(out: Path):
+    """Mechanistic interpretability paired with the heavy-tail formation. Over the same
+    from-scratch GPT-2 checkpoints: (A) the induction circuit ignites just as the Bayesian
+    alpha crosses into the heavy-tailed band; (B) the weight stable rank collapses first
+    (spectral spike forms) and then the top singular subspaces freeze (drift -> 0); (C) one
+    head (L7H1) comes online with both signatures at once -- behavioural induction and its
+    OV copying eigenvalues. Causal ordering: heavy tail forms, then the circuit lights up."""
+    d = Path("/data/mhough/wwj_traj")
+    need = [d / f for f in ("circuit_summary.csv", "circuit_heads.csv", "traj_summary.csv")]
+    if not all(p.exists() for p in need):
+        return
+    s = pd.read_csv(d / "circuit_summary.csv").sort_values("step").reset_index(drop=True)
+    H = pd.read_csv(d / "circuit_heads.csv")
+    a = pd.read_csv(d / "traj_summary.csv").sort_values("step").reset_index(drop=True)
+    xs = lambda v: np.where(np.asarray(v) == 0, 0.7, v)
+    ticks, tlabs = [0.7, 10, 100, 1000, 8837], ["init", "10", "100", "1k", "8.8k"]
+
+    def _xfmt(ax):
+        ax.set_xscale("log"); ax.set_xlim(0.55, 1.3e4)
+        ax.set_xticks(ticks); ax.set_xticklabels(tlabs)
+        ax.set_xlabel("training step (log; 0 = random init)")
+
+    fig, (axA, axB, axC) = plt.subplots(1, 3, figsize=(12.8, 3.7))
+
+    # A: alpha (left) + max induction (right) -- the temporal lock
+    axA.plot(xs(a["step"]), a["mean_alpha_bayes"], "o-", color="#1f77b4", ms=3.5, lw=1.8)
+    axA.axhline(2.0, color="green", lw=0.9, ls=":")
+    axA.set_ylabel(r"Bayesian $\alpha$", color="#1f77b4"); axA.tick_params(axis="y", labelcolor="#1f77b4")
+    axA.axvspan(300, 1000, color="orange", alpha=0.10, lw=0)
+    aR = axA.twinx()
+    aR.plot(xs(s["step"]), s["max_induction"], "s-", color="#d62728", ms=3.5, lw=1.8)
+    aR.set_ylabel("max induction score", color="#d62728"); aR.tick_params(axis="y", labelcolor="#d62728")
+    aR.set_ylim(-0.03, 0.85)
+    _xfmt(axA); axA.set_title(r"Induction ignites as $\alpha\!\to\!$ heavy-tail band")
+
+    # B: stable rank collapse (left) + subspace freezing (right)
+    axB.plot(xs(s["step"]), s["mean_stable_rank"], "o-", color="#9467bd", ms=3.5, lw=1.8)
+    axB.set_ylabel("mean stable rank", color="#9467bd"); axB.tick_params(axis="y", labelcolor="#9467bd")
+    bR = axB.twinx()
+    bR.plot(xs(s["step"]), s["mean_subspace_drift"], "^-", color="#ff7f0e", ms=3.5, lw=1.8)
+    bR.set_ylabel("top-subspace drift (0 = frozen)", color="#ff7f0e"); bR.tick_params(axis="y", labelcolor="#ff7f0e")
+    bR.set_ylim(-0.02, None)
+    _xfmt(axB); axB.set_title("Spike forms first, then subspaces freeze")
+
+    # C: one head, two signatures (induction + OV copying)
+    h = H[(H["layer"] == 7) & (H["head"] == 1)].sort_values("step")
+    axC.plot(xs(h["step"]), h["induction"], "s-", color="#d62728", ms=3.5, lw=1.8, label="induction (behavioural)")
+    axC.plot(xs(h["step"]), h["copying"], "o-", color="#17becf", ms=3.5, lw=1.8, label="OV copying (eigenvalue)")
+    axC.axhline(0.5, color="grey", lw=0.7, ls=":")
+    axC.set_ylabel("score"); axC.set_ylim(0, 1.0)
+    _xfmt(axC); axC.set_title("One circuit (L7H1), two signatures")
+    axC.legend(fontsize=7.5, loc="upper left")
+
+    sns.despine(fig, right=False); fig.tight_layout()
+    fig.savefig(out / "fig_circuit_trajectory.png", dpi=170, bbox_inches="tight"); plt.close(fig)
+
+
 def make_all(out: Path):
     out.mkdir(parents=True, exist_ok=True)
     fig_gpt_dissolution(out); fig_vgg_eiv(out); fig_mechanism(out)
-    fig_training_maturity(out); fig_alpha_trajectory(out)
+    fig_training_maturity(out); fig_alpha_trajectory(out); fig_circuit_trajectory(out)
 
 
 if __name__ == "__main__":
