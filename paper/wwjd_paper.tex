@@ -158,7 +158,9 @@ the hierarchical model samples.
 
 The reanalysis above validates the diagnostics on models with known answers. We now turn them on the
 open question: does proximity to $\alpha = 2$ actually confer robustness, across modalities? We summarize
-a positive neuroimaging result and a negative foundation-model-scale pathology result.
+two \emph{exploratory} probes---a positive neuroimaging signal and a negative foundation-model-scale
+pathology result---and treat both as preliminary, to be read alongside the controlled $\alpha$-steering
+test of \cref{sec:ww_replication}.
 
 \textbf{Neuroimaging (positive, partial).} A cross-modality survey of five neuroimaging checkpoints places
 the BrainIAC lineage near the RG optimum (mean $|\alpha-2| \in \{0.12, 0.40\}$) and the MindEye lineage far
@@ -167,9 +169,13 @@ per-subject layers with $\alpha \in [8,11]$, a silent failure of bare $\alpha$ r
 sweep over 20 WAND subjects under TorchIO perturbations, the spectrally-closer checkpoint shows
 $3\times$ lower CLS-embedding drift under bias field (Wilcoxon $p = 0.00022$, $9/10$ perturbation seeds
 $p < 0.05$), with the effect concentrated in smooth, physics-realistic perturbations (bias field, motion)
-and absent for high-frequency artifacts (spike, noise)---the pattern the RG theory predicts. A controlled
-MLP ablation confirms the causal direction: \texttt{alpha\_loss} drives mean $\alpha$ to $2.00$ within 1000
-steps and uniformly improves noise robustness.
+and absent for high-frequency artifacts (spike, noise)---the pattern the RG theory predicts. In a
+preliminary MLP ablation, \texttt{alpha\_loss} drives its differentiable (Hill) $\alpha$ target to
+$\approx\!2.00$ within 1000 steps and improves noise robustness on this sweep. We note, however, that the
+controlled GPT-2 steering test of \cref{sec:ww_replication} (\cref{fig:areg}) shows this same regularizer
+optimizes the surrogate \emph{without} moving the rigorous Bayesian $\alpha$ toward $2$; whether this
+robustness gain reflects genuine spectral maturation or that metric-hack is unresolved, and is a target for
+the larger-dataset runs now in preparation.
 
 \textbf{Pathology (negative).} The same \texttt{alpha\_loss} regularizer, applied at foundation-model scale
 during continual DINOv2 pretraining of a ViT-S pathology encoder ($10^{18}$-FLOP budget), is
