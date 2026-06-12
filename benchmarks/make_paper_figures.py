@@ -239,10 +239,52 @@ def fig_circuit_trajectory(out: Path):
     fig.savefig(out / "fig_circuit_trajectory.png", dpi=170, bbox_inches="tight"); plt.close(fig)
 
 
+def fig_alpha_reg_causal(out: Path):
+    """Causal intervention: a seed-matched pair, identical except an alpha->2 regularizer
+    (differentiable Hill surrogate) added to the loss of the 'areg' arm. The regularizer
+    drives its Hill target to 2 but (A) makes the *Bayesian* alpha WORSE (Goodhart -- the
+    rigorous estimator catches the metric-hack), while (B) induction forms about the same and
+    (C) the spectrum is actually less concentrated (higher stable rank). alpha is a readout of
+    training, not a lever you can pull."""
+    d = Path("/data/mhough/wwj_traj")
+    f = {"bt": d / "areg_base" / "traj_summary.csv", "at": d / "areg_a2" / "traj_summary.csv",
+         "bc": d / "areg_base_circuit_summary.csv", "ac": d / "areg_a2_circuit_summary.csv"}
+    if not all(p.exists() for p in f.values()):
+        return
+    bt, at = pd.read_csv(f["bt"]).sort_values("step"), pd.read_csv(f["at"]).sort_values("step")
+    bc, ac = pd.read_csv(f["bc"]).sort_values("step"), pd.read_csv(f["ac"]).sort_values("step")
+    xs = lambda v: np.where(np.asarray(v) == 0, 0.7, v)
+    ticks, tlabs = [0.7, 10, 100, 1000, 8837], ["init", "10", "100", "1k", "8.8k"]
+    BLUE, RED = "#1f77b4", "#d62728"
+
+    def _xf(ax):
+        ax.set_xscale("log"); ax.set_xlim(0.55, 1.3e4)
+        ax.set_xticks(ticks); ax.set_xticklabels(tlabs); ax.set_xlabel("training step (log)")
+
+    fig, (axA, axB, axC) = plt.subplots(1, 3, figsize=(12.8, 3.7))
+    axA.plot(xs(bt["step"]), bt["mean_alpha_bayes"], "o-", color=BLUE, ms=3.5, lw=1.7, label="baseline (λ=0)")
+    axA.plot(xs(at["step"]), at["mean_alpha_bayes"], "s-", color=RED, ms=3.5, lw=1.7, label=r"+ $\alpha\!\to\!2$ reg ($\lambda$=1)")
+    axA.axhline(2.0, color="green", lw=0.9, ls=":")
+    axA.text(8837, 2.03, r"Hill target $\alpha=2$ (reached)", color="green", fontsize=7, va="bottom", ha="right")
+    _xf(axA); axA.set(ylabel=r"Bayesian $\alpha$", title=r"Regularizer makes Bayesian $\alpha$ WORSE (Goodhart)")
+    axA.legend(fontsize=8, loc="upper right")
+    axB.plot(xs(bc["step"]), bc["max_induction"], "o-", color=BLUE, ms=3.5, lw=1.7, label="baseline")
+    axB.plot(xs(ac["step"]), ac["max_induction"], "s-", color=RED, ms=3.5, lw=1.7, label="+ reg")
+    _xf(axB); axB.set(ylabel="max induction score", title="Induction forms about the same", ylim=(-0.03, 0.85))
+    axB.legend(fontsize=8, loc="upper left")
+    axC.plot(xs(bc["step"]), bc["mean_stable_rank"], "o-", color=BLUE, ms=3.5, lw=1.7, label="baseline")
+    axC.plot(xs(ac["step"]), ac["mean_stable_rank"], "s-", color=RED, ms=3.5, lw=1.7, label="+ reg")
+    _xf(axC); axC.set(ylabel="mean stable rank", title="Reg is LESS concentrated (higher stable rank)")
+    axC.legend(fontsize=8, loc="upper right")
+    sns.despine(fig); fig.tight_layout()
+    fig.savefig(out / "fig_alpha_reg_causal.png", dpi=170, bbox_inches="tight"); plt.close(fig)
+
+
 def make_all(out: Path):
     out.mkdir(parents=True, exist_ok=True)
     fig_gpt_dissolution(out); fig_vgg_eiv(out); fig_mechanism(out)
     fig_training_maturity(out); fig_alpha_trajectory(out); fig_circuit_trajectory(out)
+    fig_alpha_reg_causal(out)
 
 
 if __name__ == "__main__":

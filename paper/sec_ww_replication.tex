@@ -211,6 +211,41 @@ rank across the trajectory.}
 \label{fig:circuit}
 \end{figure}
 
+\paragraph{Can you \emph{steer} $\alpha$? A causal test, and a Goodhart warning.}
+The lock between heavy-tail formation and circuit formation invites the obvious intervention: add a
+differentiable regularizer that pulls every layer's $\alpha$ toward the RG-optimal $2$ and ask
+whether circuits form sooner. We ran the seed-matched controlled version---two from-scratch
+GPT-2-124M with \emph{identical} initialization and data order, differing only by the regularizer
+(the differentiable Hill-estimator surrogate $\lambda\sum_\ell(\alpha_\ell-2)^2$, $\lambda=1$, on
+the same matrices)---and analyzed both with the full pipeline (\cref{fig:areg}). The result is a
+clean Goodhart failure. The regularizer drove its \emph{own} (Hill) target to $2$ (penalty
+$<\!10^{-5}$), yet the rigorous \texttt{wwjd} posterior $\alpha$ moved the \emph{wrong} way: it ended
+\emph{further} from $2$ than the unregularized baseline ($\wwAregRegAlpha$ vs $\wwAregBaseAlpha$), and
+diverged most mid-training ($\wwAregRegAlphaMid$ vs $\wwAregBaseAlphaMid$ at step $500$). The spectrum
+became \emph{less} concentrated, not more (mean stable rank $\wwAregRegSR$ vs $\wwAregBaseSR$). The
+model simply found weights that satisfy the fixed-window Hill metric without a genuinely heavier
+tail---and the Bayesian estimator, which marginalizes the window, is exactly what exposes the hack
+that the single-window surrogate hides. Crucially, the intervention bought \emph{no circuit}: language
+modeling was unchanged (final loss $\wwAregRegLoss$ vs $\wwAregBaseLoss$) and the induction circuit
+formed at essentially the same time and strength (max induction $\wwAregRegInd$ vs $\wwAregBaseInd$;
+$8$ induction heads either way). Forcing the metric does not build the mechanism. We read this as
+direct evidence that $\alpha$ is a \emph{diagnostic readout} of training quality, not a control knob:
+the heavy tail that emerges under good training (\cref{fig:traj,fig:circuit}) is downstream of the
+computation, and optimizing the exponent directly is a metric-hack the point estimate rewards and the
+posterior catches.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.99\textwidth]{fig_alpha_reg_causal.png}
+\caption{Causal test of the $\alpha\!\to\!2$ regularizer (seed-matched pair; only the regularizer
+differs). \textbf{Left:} the regularizer reaches its Hill target ($\alpha=2$, green) but makes the
+\emph{Bayesian} $\alpha$ \emph{worse} (red above blue throughout)---a Goodhart hack the posterior
+detects. \textbf{Center:} induction forms about the same in both arms. \textbf{Right:} the regularized
+spectrum is \emph{less} concentrated (higher stable rank). $\alpha$ is a readout of training, not a
+lever: forcing it neither matures the spectrum (by the rigorous measure) nor builds the circuit.}
+\label{fig:areg}
+\end{figure}
+
 \input{generated_tables}
 \begin{table}[t]
 \centering\small

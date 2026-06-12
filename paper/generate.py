@@ -107,6 +107,26 @@ def values_tex() -> str:
             out.append(_m("wwCircIndStrong", f"{ind4}"))
             out.append(_m("wwCircFinalInd", f"{c['max_induction'].iloc[-1]:.2f}"))
             out.append(_m("wwCircNHeads", f"{int(c['n_induction_heads'].iloc[-1])}"))
+    # alpha->2 regularizer CAUSAL test (Goodhart): seed-matched base vs areg arms
+    import json
+    W = DATA.parent / "wwj_traj"
+    abt, aat = W / "areg_base" / "traj_summary.csv", W / "areg_a2" / "traj_summary.csv"
+    if abt.exists() and aat.exists():
+        bt = pd.read_csv(abt).set_index("step")["mean_alpha_bayes"]
+        at = pd.read_csv(aat).set_index("step")["mean_alpha_bayes"]
+        bc = pd.read_csv(W / "areg_base_circuit_summary.csv").set_index("step")
+        ac = pd.read_csv(W / "areg_a2_circuit_summary.csv").set_index("step")
+        out.append(_m("wwAregBaseAlpha", f"{bt.iloc[-1]:.2f}"))
+        out.append(_m("wwAregRegAlpha", f"{at.iloc[-1]:.2f}"))
+        out.append(_m("wwAregBaseAlphaMid", f"{bt.loc[500]:.2f}"))
+        out.append(_m("wwAregRegAlphaMid", f"{at.loc[500]:.2f}"))
+        out.append(_m("wwAregBaseSR", f"{bc['mean_stable_rank'].iloc[-1]:.0f}"))
+        out.append(_m("wwAregRegSR", f"{ac['mean_stable_rank'].iloc[-1]:.0f}"))
+        out.append(_m("wwAregBaseInd", f"{bc['max_induction'].iloc[-1]:.2f}"))
+        out.append(_m("wwAregRegInd", f"{ac['max_induction'].iloc[-1]:.2f}"))
+        for tag, p in [("Base", abt.parent), ("Reg", aat.parent)]:
+            h = json.load(open(p / "log_history.json"))
+            out.append(_m(f"wwAreg{tag}Loss", f"{[r['loss'] for r in h if 'loss' in r][-1]:.2f}"))
     return "".join(out)
 
 
