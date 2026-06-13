@@ -186,6 +186,31 @@ report this as an honest boundary on the $\alpha = 2$ prediction: the diagnostic
 the Bayesian corrections above) is robust, but the \emph{interventional} robustness payoff is
 scale- and modality-dependent.
 
+\textbf{Why the FM-scale intervention is inert: a spectral mechanism.} Running \texttt{wwjd} across
+$\wwBridgeN$ pathology ViT-S backbones we trained (varied recipes---JEPA, iBOT, KDE, distillation, stain
+augmentation) and joining each EMA backbone's posterior $\alpha$ with its downstream probe score makes the
+reason concrete (\cref{fig:pathspec}). Across the $\wwBridgeNHealthy$ healthy runs the Bayesian $\alpha$ is
+\emph{near-invariant}---$\wwBridgeAlphaLo$--$\wwBridgeAlphaHi$ (std $\wwBridgeAlphaStd$)---while the probe
+score ranges $\wwBridgeScoreLo$--$\wwBridgeScoreHi$; the only run whose $\alpha$ departs is a collapsed one
+($\alpha=\wwBridgeCollapseAlpha$ at score $\wwBridgeCollapseScore$). At fixed architecture under a fixed FLOP
+budget every healthy backbone sits in the same undertrained regime, so $\alpha$ detects gross
+\emph{collapse} but is blind to the recipe choices (augmentation, masking, metadata guidance) that actually
+move downstream quality. This is the same coarseness as the controlled steering test: $\alpha$ is a
+diagnostic of \emph{architecture and training maturity}---where it ranges (VGG depths, the GPT-2 trajectory)
+it predicts strongly---not a lever on, nor a predictor of, recipe-level feature quality at fixed scale. The
+FM-scale \texttt{alpha\_loss} null is exactly what this spectral invariance predicts.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.55\textwidth]{fig_pathology_spectrum.png}
+\caption{wwjd posterior $\alpha$ vs downstream probe score across $\wwBridgeN$ pathology ViT-S backbones we
+trained. At fixed architecture/FLOP budget $\alpha$ is near-invariant (shaded band, $\approx\!3.05$, std
+$\wwBridgeAlphaStd$) across recipes spanning probe score $\wwBridgeScoreLo$--$\wwBridgeScoreHi$; it flags
+gross collapse (red) but does not track recipe-level quality. The spectral mechanism behind the
+\texttt{alpha\_loss} FM-scale null. ($n=\wwBridgeN$; mixed probe suites; honest negative.)}
+\label{fig:pathspec}
+\end{figure}
+
 \section{Discussion}
 \label{sec:discussion}
 

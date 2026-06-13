@@ -127,6 +127,21 @@ def values_tex() -> str:
         for tag, p in [("Base", abt.parent), ("Reg", aat.parent)]:
             h = json.load(open(p / "log_history.json"))
             out.append(_m(f"wwAreg{tag}Loss", f"{[r['loss'] for r in h if 'loss' in r][-1]:.2f}"))
+    # cross-modality spectral bridge: wwjd alpha-hat vs nanopath probe score (fixed ViT-S)
+    bp = DATA.parent / "wwj_pathology_bridge" / "ww_bridge.csv"
+    if bp.exists():
+        b = pd.read_csv(bp)
+        hh = b[b["score"] > 0.5]; cc = b[b["score"] <= 0.5]
+        out.append(_m("wwBridgeN", f"{len(b)}"))
+        out.append(_m("wwBridgeNHealthy", f"{len(hh)}"))
+        out.append(_m("wwBridgeAlphaLo", f"{hh['mean_alpha_bayes'].min():.2f}"))
+        out.append(_m("wwBridgeAlphaHi", f"{hh['mean_alpha_bayes'].max():.2f}"))
+        out.append(_m("wwBridgeAlphaStd", f"{hh['mean_alpha_bayes'].std():.3f}"))
+        out.append(_m("wwBridgeScoreLo", f"{hh['score'].min():.2f}"))
+        out.append(_m("wwBridgeScoreHi", f"{hh['score'].max():.2f}"))
+        if len(cc):
+            out.append(_m("wwBridgeCollapseAlpha", f"{cc['mean_alpha_bayes'].iloc[0]:.2f}"))
+            out.append(_m("wwBridgeCollapseScore", f"{cc['score'].iloc[0]:.2f}"))
     return "".join(out)
 
 

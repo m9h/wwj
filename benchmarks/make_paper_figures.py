@@ -280,11 +280,40 @@ def fig_alpha_reg_causal(out: Path):
     fig.savefig(out / "fig_alpha_reg_causal.png", dpi=170, bbox_inches="tight"); plt.close(fig)
 
 
+def fig_pathology_spectrum(out: Path):
+    """Cross-modality boundary: wwjd alpha-hat on a fleet of pathology ViT-S backbones we
+    trained (nanopath arms), vs their downstream probe score. At fixed architecture under
+    the FLOP cap the Bayesian alpha is near-invariant (~3.05) across recipes -- it flags
+    gross collapse (one run at alpha 2.59 / score 0.45) but does NOT predict recipe-level
+    quality. The spectral mechanism behind the pathology alpha_loss null."""
+    p = Path("/data/mhough/wwj_pathology_bridge/ww_bridge.csv")
+    if not p.exists():
+        return
+    df = pd.read_csv(p)
+    h = df[df["score"] > 0.5]; coll = df[df["score"] <= 0.5]
+    fig, ax = plt.subplots(figsize=(5.0, 3.6))
+    ax.scatter(h["score"], h["mean_alpha_bayes"], s=34, color="#1f77b4", label="healthy ViT-S arms", zorder=3)
+    if len(coll):
+        ax.scatter(coll["score"], coll["mean_alpha_bayes"], s=46, color="#d62728", marker="X",
+                   label="collapsed run", zorder=3)
+        ax.annotate("collapse", (coll["score"].iloc[0], coll["mean_alpha_bayes"].iloc[0]),
+                    fontsize=8, xytext=(8, 4), textcoords="offset points", color="#d62728")
+    ax.axhspan(h["mean_alpha_bayes"].min(), h["mean_alpha_bayes"].max(), color="#1f77b4", alpha=0.12, zorder=0)
+    ax.axhline(2.0, color="green", lw=0.9, ls=":")
+    ax.text(0.46, 2.04, r"RG optimum $\alpha=2$", color="green", fontsize=8, va="bottom")
+    ax.text(0.60, h["mean_alpha_bayes"].mean() + 0.02,
+            r"healthy band: $\alpha\!\approx\!3.05$ (std 0.003)", color="#1f77b4", fontsize=8, ha="center")
+    ax.set(xlabel="downstream probe score", ylabel=r"Bayesian $\alpha$ (EMA backbone)",
+           ylim=(1.9, 3.3), title=r"$\alpha$ flags collapse, not recipe quality (fixed ViT-S)")
+    ax.legend(fontsize=8, loc="lower right"); sns.despine(fig); fig.tight_layout()
+    fig.savefig(out / "fig_pathology_spectrum.png", dpi=170, bbox_inches="tight"); plt.close(fig)
+
+
 def make_all(out: Path):
     out.mkdir(parents=True, exist_ok=True)
     fig_gpt_dissolution(out); fig_vgg_eiv(out); fig_mechanism(out)
     fig_training_maturity(out); fig_alpha_trajectory(out); fig_circuit_trajectory(out)
-    fig_alpha_reg_causal(out)
+    fig_alpha_reg_causal(out); fig_pathology_spectrum(out)
 
 
 if __name__ == "__main__":
