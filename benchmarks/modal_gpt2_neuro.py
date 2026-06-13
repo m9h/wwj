@@ -303,25 +303,23 @@ def _train_traj_reg(epochs, lr, alpha_reg, alpha_warmup, seed, tag, track=False,
                               TrainerCallback, set_seed, default_data_collator)
 
     # Differentiable alpha->2 penalty (mirrors benchmarks/alpha_reg.py: a torch port of
-    # wwj.core._hill_alpha / _eigvals; smaller-side Gram eigvalsh -- NOT svdvals(W), which
-    # hits cuSOLVER's slow tall-matrix path on the 50257x768 embedding (~20 s/step); fp32).
-    def hill_alpha(W, frac=0.5, eps=1e-12):
-        n, m = W.shape[0], W.shape[1]; N = float(max(n, m))
-        X = (W.t() @ W) / N if n >= m else (W @ W.t()) / N
-        lam = torch.linalg.eigvalsh(X.float()).flip(0).clamp_min(0.0)
-        k = max(1, int(lam.shape[0] * frac)); top = lam[:k]
-        xmin = top[-1].clamp_min(eps)
-        denom = torch.log(top.clamp_min(eps) / xmin).sum().clamp_min(eps)
-        return 1.0 + k / denom
-
-    def alpha_penalty(model, target=2.0, frac=0.5, min_dim=50):
+    # wwj.core._hill_alpha / _eigvals). Smaller-side Gram (768x768 for every GPT-2 matrix),
+    # NOT svdvals(W) -- a full SVD of the 50257x768 embedding hits cuSOLVER's slow tall path
+    # (~20 s/step). All Grams are 768x768, so we batch them into ONE eigvalsh (~10x faster
+    # than 50 sequential cuSOLVER calls -- the per-step cost); fp32, no autocast.
+    def alpha_penalty(model, target=2.0, frac=0.5, min_dim=50, eps=1e-12):
         base = model.transformer
         with torch.autocast(device_type="cuda", enabled=False):
-            terms = [(hill_alpha(p.reshape(p.shape[0], -1), frac) - target) ** 2
-                     for nm, p in base.named_parameters()
-                     if nm.endswith("weight") and p.ndim >= 2
-                     and min(p.shape[0], p.numel() // p.shape[0]) >= min_dim]
-        return torch.stack(terms).mean()
+            grams = []
+            for nm, p in base.named_parameters():
+                if nm.endswith("weight") and p.ndim >= 2 and min(p.shape[0], p.numel() // p.shape[0]) >= min_dim:
+                    W = p.reshape(p.shape[0], -1).float(); n, m = W.shape; N = float(max(n, m))
+                    grams.append((W.t() @ W) / N if n >= m else (W @ W.t()) / N)
+            lam = torch.linalg.eigvalsh(torch.stack(grams)).flip(-1).clamp_min(0.0)   # (L, 768)
+            k = max(1, int(lam.shape[-1] * frac))
+            top = lam[..., :k].clamp_min(eps); xmin = top[..., -1:].clamp_min(eps)
+            alphas = 1.0 + k / torch.log(top / xmin).sum(-1).clamp_min(eps)           # (L,)
+        return ((alphas - target) ** 2).mean()
 
     set_seed(seed)                                     # identical init + data order across arms
     out = f"{VOL}/exp/{tag}"; os.makedirs(out, exist_ok=True)
@@ -346,13 +344,18 @@ def _train_traj_reg(epochs, lr, alpha_reg, alpha_warmup, seed, tag, track=False,
             loss, o = super().compute_loss(model, inputs, return_outputs=True,
                                            num_items_in_batch=num_items_in_batch)
             if alpha_reg > 0:
-                pen = alpha_penalty(model)
-                ramp = min(1.0, self.state.global_step / max(1, alpha_warmup))
-                loss = loss + (alpha_reg * ramp / self.args.gradient_accumulation_steps) * pen
-                self._pen = float(pen.detach())
-            else:
-                with torch.no_grad():
-                    self._pen = float(alpha_penalty(model))   # logged for comparison only
+                # The penalty depends only on the weights, which are CONSTANT across the ga
+                # micro-batches of one optimizer step -> compute it ONCE per optimizer step
+                # (on the last micro-batch), not ga=8 times. Added at full weight: its gradient
+                # accumulates once, so total per-step loss = LM_mean + alpha_reg*ramp*penalty.
+                self._mb = getattr(self, "_mb", 0) + 1
+                if self._mb % self.args.gradient_accumulation_steps == 0:
+                    pen = alpha_penalty(model)
+                    ramp = min(1.0, self.state.global_step / max(1, alpha_warmup))
+                    loss = loss + alpha_reg * ramp * pen
+                    self._pen = float(pen.detach())
+            # baseline (alpha_reg=0): skip the penalty entirely -> native training speed;
+            # its alpha trajectory comes from analyze_traj + trackio_backfill post-hoc.
             return (loss, o) if return_outputs else loss
         def log(self, logs, *a, **k):
             if hasattr(self, "_pen"):
