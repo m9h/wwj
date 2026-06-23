@@ -108,13 +108,25 @@ def calibration_coverage(band: dict, observed: np.ndarray) -> float:
 
 
 # ---------------------------------------------------------------------------- observed curve (ridge CV)
+def _ridge_cv_r(X: np.ndarray, y: np.ndarray, alpha: float = 10.0, k: int = 5, seed: int = 0) -> float:
+    """k-fold ridge-CV Pearson r of out-of-fold predictions — pure numpy (no sklearn), standardised
+    per fold, ridge solved in closed form (matches phase_probe's StandardScaler+Ridge(alpha=10))."""
+    n = len(y)
+    idx = np.random.default_rng(seed).permutation(n)
+    yp = np.empty(n)
+    for fold in np.array_split(idx, k):
+        tr = np.setdiff1d(idx, fold, assume_unique=False)
+        mu, sd = X[tr].mean(0), X[tr].std(0) + 1e-8
+        Xtr, Xte = (X[tr] - mu) / sd, (X[fold] - mu) / sd
+        yb = y[tr].mean()
+        A = Xtr.T @ Xtr + alpha * np.eye(Xtr.shape[1])
+        w = np.linalg.solve(A, Xtr.T @ (y[tr] - yb))
+        yp[fold] = Xte @ w + yb
+    return float(np.corrcoef(y, yp)[0, 1])
+
+
 def observed_curve(X: np.ndarray, y: np.ndarray, N_grid, seed: int = 0) -> np.ndarray:
     """Empirical performance (5-fold ridge-CV Pearson r) at each subsample size; NaN where N > n."""
-    import warnings; warnings.filterwarnings("ignore")
-    from sklearn.linear_model import Ridge
-    from sklearn.preprocessing import StandardScaler
-    from sklearn.pipeline import make_pipeline
-    from sklearn.model_selection import cross_val_predict, KFold
     m = np.isfinite(np.asarray(y, float))
     X, y = np.asarray(X)[m], np.asarray(y, float)[m]
     rng = np.random.default_rng(seed)
@@ -122,10 +134,8 @@ def observed_curve(X: np.ndarray, y: np.ndarray, N_grid, seed: int = 0) -> np.nd
     for n in np.asarray(N_grid, int):
         if n > len(y):
             out.append(np.nan); continue
-        idx = rng.choice(len(y), size=int(n), replace=False)
-        pipe = make_pipeline(StandardScaler(), Ridge(alpha=10.0))
-        yp = cross_val_predict(pipe, X[idx], y[idx], cv=KFold(5, shuffle=True, random_state=0))
-        out.append(float(np.corrcoef(y[idx], yp)[0, 1]))
+        sub = rng.choice(len(y), size=int(n), replace=False)
+        out.append(_ridge_cv_r(X[sub], y[sub], seed=seed))
     return np.array(out)
 
 
@@ -159,15 +169,11 @@ def main() -> None:
         band = learning_curve_posterior(cov, al, N)
         ns = n_star(band["gamma_median"], band["beta_median"])
         ns_s = "inf" if not np.isfinite(ns) else f"{ns:.0f}"
-        try:                                            # calibration needs sklearn (your uv env)
-            obs = observed_curve(X, y, N)
-            rel = {"lo": _rescale(band["lo"]), "hi": _rescale(band["hi"]), "median": _rescale(band["median"])}
-            cov_frac = f"{calibration_coverage(rel, _rescale(obs)):.2f}"
-            rmax = f"{np.nanmax(obs):.2f}"
-        except ImportError:
-            cov_frac, rmax = "n/a", "n/a"
+        obs = observed_curve(X, y, N)                    # pure-numpy ridge CV (no sklearn)
+        rel = {"lo": _rescale(band["lo"]), "hi": _rescale(band["hi"]), "median": _rescale(band["median"])}
+        cov_frac = calibration_coverage(rel, _rescale(obs))
         print(f"  {t:14s} {band['beta_median']:6.2f} {band['p_no_saturation']:9.2f} {ns_s:>9s} "
-              f"{cov_frac:>9s} {rmax:>6s}")
+              f"{cov_frac:9.2f} {np.nanmax(obs):6.2f}")
 
 
 if __name__ == "__main__":

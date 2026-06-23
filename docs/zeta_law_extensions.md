@@ -127,9 +127,26 @@ E2 (`benchmarks/zeta_law/e2_learning_curve.py`) turns the exponents into a predi
 Actionable per-target verdict: collect more subjects for **externalizing** (~15k); for the harder
 factors (**attention / internalizing / p_factor**, β≈1.1–1.2) scaling past HBN won't realistically help
 — invest in the representation. *Caveats:* n=645 here is small ⇒ wide posteriors on β near 1; `n*` is a
-zeta-law **extrapolation** pending the observed-curve **calibration** (E2's `observed_curve`, which needs
-sklearn in the uv env) — coverage is to be measured on the full cohort, where the ridge-CV curve is
-compared against the band.
+zeta-law **extrapolation** pending the observed-curve calibration below.
+
+### Calibration (first run — `e2_calibrate.py`)
+
+Over the cache (`neurostorm`, `swift`; n=645, ~0.6 decade of N — pure-numpy ridge CV, no sklearn). The
+run is honest about its own limits:
+
+- **Only `age` carries predictable signal** (r@max 0.68 / 0.56). The **psychopathology factors are
+  ~unpredictable from these fMRI-volume embeddings** (r@max ≈ 0), so their β/n* are **vacuous** — you
+  cannot measure signal-alignment decay where there is no signal. *β is only interpretable when r@max
+  is non-trivial.*
+- For **age**, the observed-curve shape **weakly tracks the prediction**: `swift` (steep β=2.76 → fast
+  saturation) decelerates (obs_inc=0.35), `neurostorm` (shallow β=1.64) still accelerates (obs_inc=3.0)
+  — a tentative calibration hit on the one signal-bearing target.
+- **Under-powered**: ~0.6 decade of N; n* extrapolations span 1e2–1e8 and are not yet trustworthy.
+
+Verdict: the framework runs end-to-end on real HBN, but conclusive calibration needs (a) the
+full/larger cohort for N-range, and (b) embeddings/targets that actually carry signal. The latter
+motivates the **cross-modal (E4) EEG↔sMRI** direction on the harmonized HBN cohort, where a
+shared structure–function subspace may carry more than the fMRI-volume embeddings do for these factors.
 
 ## References
 - Thompson (2026), arXiv:2604.17581 — the zeta law (data-spectrum, theory-only).
