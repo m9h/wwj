@@ -39,18 +39,25 @@ def covariance_spectrum(X: np.ndarray) -> np.ndarray:
     return np.asarray(_eigvals(jnp.asarray(X, dtype=jnp.float64)))
 
 
-def alignment_spectrum(X: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Per-mode aligned signal energy: square of the target's regression coefficient on each data
-    eigenmode, sorted descending. First-pass proxy for the Canatar–Pehlevan task–model alignment
-    (the rigorous kernel-target normalization is the refinement)."""
+def alignment_spectrum(X: np.ndarray, y: np.ndarray, ridge_frac: float = 1e-3) -> np.ndarray:
+    """Per-mode **explained variance** of the target — the covariance-deconfounded aligned signal
+    energy, `coeffᵢ² / λᵢ` (Canatar–Pehlevan target power), sorted descending.
+
+    Using the raw cross-covariance `coeffᵢ²` instead conflates the target with the covariance decay
+    (every target then looks concentrated → spurious β>1, as the first HBN run showed); dividing by the
+    eigenvalue isolates the target's spectral content. The division is ridge-regularized
+    (`+ ridge_frac·λ_max`) so near-zero (noise) eigenvalues do not blow up. The full kernel-target-
+    alignment normalization is a further refinement."""
     Xc = X - X.mean(0, keepdims=True)
     yc = np.asarray(y, dtype=float) - float(np.mean(y))
     C = (Xc.T @ Xc) / Xc.shape[0]
     w, V = np.linalg.eigh(C)                     # ascending
-    V = V[:, ::-1]                               # eigenvectors, descending eigenvalue order
+    w, V = w[::-1], V[:, ::-1]                   # descending eigenvalue order
     cross = (Xc.T @ yc) / Xc.shape[0]            # cross-covariance vector
     coeff = V.T @ cross                          # target coefficient per eigenmode
-    return np.sort(coeff ** 2)[::-1]             # aligned energy, descending
+    lam = np.clip(w, 0.0, None)
+    a = coeff ** 2 / (lam + ridge_frac * float(lam.max()))   # explained variance per mode
+    return np.sort(a)[::-1]                      # aligned energy, descending
 
 
 # ---------------------------------------------------------------------------- diagnose one spectrum

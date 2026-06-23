@@ -87,8 +87,29 @@ testbed: open, multimodal, already in `benchmarks/hbn_full_volume.py`, with matc
 `fit_distributions` / `alpha_posterior` / `model_posterior`, with the density-α → rank-s/β conversion
 and `P(β>1)` from `p_alpha_lt_2`. Ships with a **synthetic validation** (plant `s`, `β` → recover them;
 confirm the validity gate distinguishes power-law from lognormal). Point it at HBN features next (E1).
-The alignment-energy definition is a first-pass proxy; the rigorous Canatar–Pehlevan kernel-target
-normalization is the refinement.
+The alignment energy uses the covariance-deconfounded **explained-variance** normalization
+`coeffᵢ²/λᵢ` (ridge-regularized); the full Canatar–Pehlevan kernel-target normalization is the
+further refinement.
+
+## First HBN E1 run
+
+Run on the cached HBN volume-FM embeddings (`neurostorm`, `swift`) via `benchmarks/zeta_law/hbn_e1.py`:
+
+- **Covariance side (the E1 precondition):** *both* modalities have genuinely **power-law** covariance
+  spectra — validity gate passes (logBF(pl/exp) ≫ 0, PPC p > 0.5) — so Thompson's premise *holds* here,
+  with `γ ≈ 1.55` (neurostorm) and `2.26` (swift). This is the first empirical check that the zeta law
+  even applies to real biomedical feature spectra.
+- **Alignment side:** the first pass used raw `coeffᵢ²`, which is **confounded by the covariance** and
+  reported *every* target as β>1; the deconfounded `coeffᵢ²/λᵢ` fixes it. Result: **age** (positive
+  control) is firmly variance-limited (β≈1.7 / 2.8), while several **psychopathology factors** drop
+  toward the ζ-pole — neurostorm attention β≈1.11, internalizing ≈1.18, p_factor ≈1.24
+  (`P(β>1)` 0.82–0.98) — i.e. near the **resolution-limited boundary**, consistent with their being
+  harder, more diffuse targets (age/externalizing stay clearly variance-limited). None drop
+  conclusively below 1, so E2's subsampling learning-curve + credible band is needed to call the regime.
+
+*The real-data value of the gate:* the raw-`coeffᵢ²` proxy passed on synthetic data but was exposed as
+confounded only on real HBN — which is exactly why E1 measures real spectra instead of assuming the
+law's form.
 
 ## References
 - Thompson (2026), arXiv:2604.17581 — the zeta law (data-spectrum, theory-only).
