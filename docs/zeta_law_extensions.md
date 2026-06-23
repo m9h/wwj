@@ -148,6 +148,17 @@ full/larger cohort for N-range, and (b) embeddings/targets that actually carry s
 motivates the **cross-modal (E4) EEG↔sMRI** direction on the harmonized HBN cohort, where a
 shared structure–function subspace may carry more than the fMRI-volume embeddings do for these factors.
 
+### E4 cross-modal spectrum (core built)
+
+`benchmarks/zeta_law/e4_cross_modal.py` (+ `test_e4.py`, green) — the EEG↔structural "relationship" as
+the canonical-correlation spectrum of the whitened cross-covariance (ρ₁≥ρ₂≥…∈[0,1]); strong ρ = shared
+modes (structure–function coupling). Crucially it takes `covariate=age` to **residualize out the
+age-driven / volume-conduction term** and reveal coupling beyond conduction. Synthetic demo: a 3-mode
+shared subspace with mode-0 age-driven → full spectrum ρ≈[1,1,0.99] (3 strong), age-residualized
+ρ≈[1,1,0.22] (2 strong) — the conduction mode drops out. Consumes any two subject-aligned feature
+matrices (REVE EEG embeddings ⊕ the emeg-fm tier-2 structural embedding). Completes the spectral trio:
+within-modality covariance γ (E1) · target alignment β (E2) · cross-modal coupling (E4).
+
 ## References
 - Thompson (2026), arXiv:2604.17581 — the zeta law (data-spectrum, theory-only).
 - Martin & Mahoney — HT-SR / WeightWatcher (weight-spectrum α; the `α=2` critical point).
