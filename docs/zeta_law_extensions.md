@@ -111,6 +111,26 @@ Run on the cached HBN volume-FM embeddings (`neurostorm`, `swift`) via `benchmar
 confounded only on real HBN — which is exactly why E1 measures real spectra instead of assuming the
 law's form.
 
+## First HBN E2 run
+
+E2 (`benchmarks/zeta_law/e2_learning_curve.py`) turns the exponents into a predicted learning curve and
+`n*` (samples for 90% of asymptotic performance), per target, on `neurostorm` (n=645):
+
+| target | β (med) | P(no-sat)=P(β≤1) | n*(0.9) | read |
+|---|---|---|---|---|
+| externalizing | 1.93 | 0.00 | ~15k | variance-limited → ~15k subjects reaches 90% (HBN ≪ this ⇒ more data helps) |
+| age | 1.65 | 0.00 | ~5M | saturates, but data-hungry for this embedding |
+| p_factor | 1.24 | 0.01 | ∞ (>1e12) | near pole → effectively resolution-limited |
+| internalizing | 1.18 | 0.07 | ∞ | near pole → resolution-limited |
+| attention | 1.11 | 0.19 | ∞ | at the pole → 19% posterior prob of no saturation; improve the encoder, not N |
+
+Actionable per-target verdict: collect more subjects for **externalizing** (~15k); for the harder
+factors (**attention / internalizing / p_factor**, β≈1.1–1.2) scaling past HBN won't realistically help
+— invest in the representation. *Caveats:* n=645 here is small ⇒ wide posteriors on β near 1; `n*` is a
+zeta-law **extrapolation** pending the observed-curve **calibration** (E2's `observed_curve`, which needs
+sklearn in the uv env) — coverage is to be measured on the full cohort, where the ridge-CV curve is
+compared against the band.
+
 ## References
 - Thompson (2026), arXiv:2604.17581 — the zeta law (data-spectrum, theory-only).
 - Martin & Mahoney — HT-SR / WeightWatcher (weight-spectrum α; the `α=2` critical point).
