@@ -86,6 +86,40 @@ position intact, self-consistently.
   curve) — but not all of it; the ceiling-anchoring protocol used here (calibrating the predicted
   asymptote to the largest measured N) has its own real limitations independent of estimation noise.
 
+## 4. Would ENIGMA-scale data change this? — split answer
+
+An obvious objection: our real-cohort tests use HBN (~600–2500 subjects per modality), far below what
+ENIGMA-scale consortium access provides. We tested this directly rather than speculate (`zeta_scale.py`,
+commit `a198768`) — the answer **splits cleanly by which finding it is**.
+
+**The single-sorted-β falsification is NOT rescued by more data, at any scale.** The synthetic
+falsification in Section 1 already estimated the alignment spectrum from 9,000 samples — large by any
+standard. It fails for a *structural* reason: sorting the alignment spectrum by magnitude is a
+many-to-one map that discards eigenmode position, so two targets with identical sorted-magnitude
+distributions but signal at different depths get identical β regardless of how precisely β is
+estimated. More data sharpens the estimate of a quantity that doesn't carry the needed information —
+it cannot restore what the sorting operation already discarded.
+
+**The full-theory real-data estimation failure (Section 3) plausibly IS a finite-sample artifact, and
+the scale needed is far more modest than "10,000×."** Isolating the per-mode target-power estimation
+problem at a realistic embedding size (P=500) and sweeping labeled sample size M: the *naive* estimator
+is biased-but-consistent (bias ~σ²/(M·λρ), shrinking with M). At HBN-like M=300 it reproduces the
+real-data failure pattern (skill as low as −2.86 against the true theoretical curve, in the hardest
+tested regime); by **M≈10,000–30,000 — squarely within a single ENIGMA structural-MRI study's realistic
+scale — naive-estimator skill converges to +1.00 in every regime tested.** So roughly a **10–30×**
+increase in labeled sample size over HBN, not 10,000×, is plausibly sufficient to resolve this
+particular failure mode.
+
+**A genuine surprise, and a correction to our own Section 3/Recommendation-3 fix:** the "robust"
+debias-and-truncate estimator we built and used to rescue real-data performance (skill −1.89 → +0.14)
+does **not** share this convergence property — swept across the same M range, its skill stays flat or
+gets *worse* (pinned around −1 to −24 in two of three regimes), because it applies a fixed heuristic
+correction rather than one that backs off as M grows. **The practical recommendation for someone at
+ENIGMA scale is therefore not our robust heuristic as built** — it is more likely: use the simple
+(naive) estimator once M is large enough, or better, replace the fixed-threshold heuristic with a
+properly M-adaptive shrinkage estimator that interpolates between aggressive correction at low M and
+none at high M. We flag this as an open item rather than a solved one.
+
 ## Recommendation
 
 1. **Retire or heavily caveat the single sorted-β regime call** for practical use — it does not
@@ -94,9 +128,12 @@ position intact, self-consistently.
    discoverability diagnostic — it recovers a real, if noisy, real-data signal that β does not have.
 3. **If the full learning-curve theory is used, flag per-mode target-power estimation as a first-class
    problem**, not an implementation detail — our results suggest it is the dominant source of real-data
-   failure, more than the theory itself (which is exact in the idealized case). A worked real-data
-   example with an explicit robust/shrinkage estimator (and its failure mode without one) would
-   strengthen the paper considerably.
+   failure, more than the theory itself (which is exact in the idealized case). This failure looks like
+   a genuinely resolvable finite-sample artifact at ENIGMA-relevant labeled-cohort sizes (~10–30× HBN,
+   Section 4) — but our own fixed-heuristic robust estimator does *not* scale correctly and would need
+   to be replaced with a properly M-adaptive shrinkage estimator before it can be trusted at that scale.
+   A worked example spanning cohort sizes, with an M-adaptive estimator, would strengthen the paper
+   considerably and is the most actionable open item here.
 4. **Report real-data validation against an honest, out-of-sample baseline** (e.g. leave-one-N-out on a
    simple flexible curve) — an in-sample comparison can make a theory look better than it is.
 
