@@ -1,0 +1,94 @@
+% DRAFT — data-side section, reframed as a MODEL COMPARISON of data-sufficiency predictors.
+% Standalone review fragment; NOT \input by wwjd_paper.tex yet. SUPERSEDES draft_structural_data_side.tex
+% (which was built on the now-falsified single-beta regime calls — psychopathology is null, and the
+% single-beta sufficiency claim does not hold; see falsification below).
+% Numbers from benchmarks/zeta_law/{hbn_bayesian_alpha,thompson_headtohead,zeta_thesis_v3,zeta_fair,
+% zeta_cbp,zeta_scale}.py.
+
+% ---- data-side numbers (update from the committed scripts) ----
+\newcommand{\DsPermP}{0.018}            % exact learned-vs-classical covariance-alpha permutation p (8 modalities)
+\newcommand{\DsBetaSynth}{0.25}         % Spearman(single-beta, log data-needed), synthetic
+\newcommand{\DsBetaReal}{-0.02}         % ... real HBN
+\newcommand{\DsRhoSynth}{0.96}          % Spearman(rho_q, log data-needed), synthetic
+\newcommand{\DsRhoReal}{0.53}           % ... real HBN
+\newcommand{\DsCbpMae}{0.012}           % CBP parameter-free curve vs simulation, MAE (true spectra)
+\newcommand{\DsCbpReal}{0.14}           % robust-CBP fair-LOO skill, real high-ceiling
+\newcommand{\DsPlReal}{0.69}            % flexible power-law fair-LOO skill, real high-ceiling
+% ---------------------------------------------------------------
+
+\subsection{Data side: the same calibrated lens overturns Thompson's discoverability exponent}
+\label{sec:dataside}
+
+The weight-side thesis --- a heavy-tailed shape exponent is a calibrated \emph{diagnostic}, not a
+\emph{lever}, and its point-estimate use is overturned by proper analysis --- has an exact data-side
+twin. Thompson's \emph{Zeta Law of Discoverability} reads a single exponent $\beta$ off a frozen
+representation's label-alignment spectrum and claims it forecasts \emph{data sufficiency}: $\beta>1$
+means more data helps, $\beta<1$ means the representation is the bottleneck. We test that claim with the
+same Bayesian machinery, and it does not survive.
+
+\textbf{Covariance side: the diagnostic transfers cleanly.} Applying the \texttt{wwjd} validity-gated
+posterior to the \emph{data} covariance spectrum (rather than a weight matrix) reproduces the weight-side
+structure. Every learned foundation-model embedding is certifiably super-critical, $\alpha_{\rm cov}<2$
+with posterior $P(\alpha<2)=1.00$ (functional and structural fMRI/sMRI models alike); every hand-built
+classical feature set sits at or above the critical point, $\alpha_{\rm cov}\ge 2$. An exact
+label-exchangeability permutation test on the learned-vs-classical split gives $p=\DsPermP$ (at the
+attainable floor for the current modality count, and tightening as more models are added). This is a
+genuine, target-free signature --- learned representations are heavy-tailed in their data covariance in a
+way classical features are not --- and it is the clean part of the data-side story.
+
+\textbf{Sufficiency side: the single exponent is falsified, and the model comparison names what it
+misses.} We compare candidate predictors of data sufficiency (measured as the training-set size to reach
+a fixed fraction of the achievable performance), on synthetic data with known ground truth and on real
+neuroimaging (foundation-model embeddings predicting age, sex, and cross-model targets):
+
+\begin{table}[t]
+\centering
+\caption{Data-sufficiency predictors, ranked. Synthetic column: rank correlation with (or curve error
+against) the known learning curve; real column: fair leave-one-$N$-out predictive skill ($1-{\rm
+MSE}/{\rm MSE}_{\rm null}$) on high-signal curves. Thompson's single $\beta$ is the claim under test; CBP
+and $\rho_q$ are alternatives; the flexible power law is the baseline.}
+\begin{tabular}{llcc}
+\toprule
+predictor & what it reads & synthetic & real (fair) \\
+\midrule
+Thompson $\beta$ (single, sorted) & sorted-alignment rank decay & $\rho=\DsBetaSynth$ & $\rho=\DsBetaReal$ \\
+CBP (capacity + source) & full spectrum, position kept & MAE $=\DsCbpMae$$^{\dagger}$ & skill $=\DsCbpReal$ \\
+$\rho_q$ (position-preserving) & cumulative source over eigenrank & $\rho=\DsRhoSynth$ & $\rho=\DsRhoReal$ \\
+flexible power law (baseline) & 2-parameter curve fit & --- & skill $=\DsPlReal$ \\
+\bottomrule
+\end{tabular}
+\\[2pt]
+{\footnotesize $^{\dagger}$parameter-free CBP prediction vs.\ simulation with the \emph{true} spectrum.
+On real data its per-mode target-power estimate is the bottleneck (Sec.~below), so it is
+estimation-limited, not theory-limited.}
+\label{tab:dataside_compare}
+\end{table}
+
+Three readings. (i) \textbf{Thompson's single $\beta$ does not forecast sufficiency} --- rank
+correlation $\DsBetaSynth$ in synthetic, $\DsBetaReal$ on real data, and its regime call is inverted at
+the easy end. The defect is structural: $\beta$ is the rank-decay of the alignment spectrum \emph{sorted
+by magnitude}, and sorting discards \emph{which eigenmode} the signal occupies --- exactly the
+eigenvalue position (high $\lambda$ = learnable with little data, low $\lambda$ = data-hungry) that sets
+sufficiency. (ii) \textbf{The position-preserving statistics recover it}: keeping the same alignment
+values in eigenvalue-rank order ($\rho_q$) restores a strong synthetic signal ($\DsRhoSynth$) and a real
+one ($\DsRhoReal$); the full capacity+source theory (CBP) is exact against simulation (MAE $\DsCbpMae$).
+(iii) \textbf{On real data even the correct theory loses to a flexible fit} --- CBP's parameter-free
+prediction (skill $\DsCbpReal$) is beaten by a two-parameter power law (skill $\DsPlReal$) scored fairly
+out-of-sample. The gap is not the physics but the estimator: per-mode target power carries a noise floor
+$\sigma^2/M$ that is not reliably subtractable at cohort sizes on the order of $10^3$; a scaling analysis
+shows a calibrated estimator recovers the true-spectrum curve once $M$ reaches $\sim10^4$ (an order of
+magnitude beyond our labeled cohorts, within consortium reach).
+
+\textbf{$\beta$ is Goodhart-able, like $\alpha$.} The discoverability exponent can be inflated by
+\emph{compressing} a representation into fewer modes (a phenotype-histogram readout raises survival
+$\beta$ from $0.4$ to $1.5$--$4.5$) without any gain in held-out separability (top-mode $\eta^2$ and
+CV-AUC do not move). This is the data-side image of the weight-side $\alpha\!\to\!2$ regularizer:
+a single shape exponent can be driven by discarding information rather than discovering it, so it must be
+reported jointly with held-out quality, never alone.
+
+The data side therefore closes the same loop as the weight side. A single calibrated shape exponent is a
+useful \emph{diagnostic} of representational structure (the super-critical covariance signature), but as
+a point-estimate \emph{predictor} of what data or training will buy you it is overturned --- structurally
+for the sorted exponent, and Goodhart-able for the compressed one. The honest tools are the calibrated,
+validity-gated diagnostic and a position-preserving (or robustly estimated) source statistic reported
+with its uncertainty.
