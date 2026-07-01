@@ -105,14 +105,21 @@ def load_hbn(models: list[str] | None = None, emb_dir: Path = EMB_DIR,
     features, target_map = {}, {}
     for model in models:
         subs, E = [], []
+        skipped = 0
         for r in rows:
             p = emb_dir / f"{r['sub']}.npz"
             if not p.exists():
                 continue
-            d = np.load(p)
+            try:
+                d = np.load(p)
+            except Exception:                       # corrupt / mid-write npz (concurrent extraction)
+                skipped += 1
+                continue
             if model not in d:
                 continue
             subs.append(r["sub"]); E.append(d[model])
+        if skipped:
+            print(f"[load_hbn] {model}: skipped {skipped} unreadable npz (concurrent write / corrupt)")
         if len(subs) < min_valid:
             continue
         features[model] = np.vstack(E)
