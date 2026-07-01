@@ -29,7 +29,8 @@ from hbn_structural import _zscore, _connectome  # noqa: E402
 from hbn_fm_existing import fm_embed, R as FMR  # noqa: E402
 
 VC = "/data/derivatives/volume_conduction"
-LEARNED = {"neurostorm", "swift", "amaes_fm", "fomo60k_fm"}
+# classical/hand-built modalities; everything else (all FM-cache models + structural FMs) is learned
+CLASSICAL = {"morph_4s456", "morph_4s1056", "blockpooled", "connectome"}
 
 
 def _age_map():
@@ -74,7 +75,7 @@ def main():
     alphas_o, groups_o = [], []
     for name, X, _ in mods:
         ap, mp, ppc, gate = _post(covariance_spectrum(X))
-        g = "learned" if name in LEARNED else "classical"
+        g = "classical" if name in CLASSICAL else "learned"
         pbygroup[g].append(ap["p_alpha_lt_2"])
         alphas_o.append(float(ap["alpha_mean"])); groups_o.append(g)
         print(f"{name:13s} {g:9s} {ap['alpha_mean']:7.2f} "
