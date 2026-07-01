@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from zeta_cbp import solve_kappa  # noqa: E402
 from zeta_tierB import maps, load_fm_cache, curve  # noqa: E402
 from zeta_robust import spectra_raw, robust_g2, cbp_curve, skill  # noqa: E402
+from zeta_estimator import spectra_coeff, madaptive_g2, noise_floor  # noqa: E402
 from hbn_fm_existing import fm_embed, R as FMR  # noqa: E402
 
 
@@ -92,7 +93,7 @@ def stage3b_fair_real():
                       ("fomo60k_fm", "fomo60k_embed/fomo60k_embeddings.npz")]:
         X, ids = fm_embed(f"{FMR}/{sub}"); reps[name] = {s: X[i] for i, s in enumerate(ids)}
 
-    sk = {"robust-CBP": [], "CBP-sorted": [], "power-law-LOO": [], "power-law-insample": []}
+    sk = {"madaptive-CBP": [], "robust-CBP": [], "CBP-sorted": [], "power-law-LOO": [], "power-law-insample": []}
     skhi = {k: [] for k in sk}
     npts = nhi = 0
 
@@ -106,11 +107,15 @@ def stage3b_fair_real():
             return
         w, g2n = spectra_raw(XA, y)
         g2r = robust_g2(w, g2n.copy())
+        w2, coeff = spectra_coeff(XA, y)                             # same eigenvalues, plus per-mode coeff
+        g2m = madaptive_g2(w2, coeff, float(np.var(y)) * (1.0 - ceil) / len(y))   # σ²/M from measured ceiling
+        cm = cbp_curve(w2, g2m, ridge, Ns, ceil)
         cc = cbp_curve(w, g2r, ridge, Ns, ceil)
         cs = cbp_curve(np.sort(w)[::-1], np.sort(g2r)[::-1], ridge, Ns, ceil)
         pl_loo = pl_pred_loo(Ns, r, ceil)
         pl_in = pl_pred_insample(Ns, r, ceil)
-        for k, pred in [("robust-CBP", cc), ("CBP-sorted", cs), ("power-law-LOO", pl_loo), ("power-law-insample", pl_in)]:
+        for k, pred in [("madaptive-CBP", cm), ("robust-CBP", cc), ("CBP-sorted", cs),
+                        ("power-law-LOO", pl_loo), ("power-law-insample", pl_in)]:
             s = skill(pred, r)
             sk[k].append(s)
             if ceil >= 0.30:
@@ -136,7 +141,7 @@ def stage3b_fair_real():
                 run(XA, pcs[:, t])
 
     print(f"{npts} curves ({nhi} high-ceiling >=0.30).  mean skill (higher=better):")
-    for k in ["robust-CBP", "CBP-sorted", "power-law-LOO", "power-law-insample"]:
+    for k in ["madaptive-CBP", "robust-CBP", "CBP-sorted", "power-law-LOO", "power-law-insample"]:
         hi = f"{np.mean(skhi[k]):+.3f}" if skhi[k] else "n/a"
         print(f"  {k:19s} all={np.mean(sk[k]):+.3f}   high-ceiling={hi}")
     print("\n(power-law-insample repeated for reference -- the previously-reported, unfairly-favourable number)")
