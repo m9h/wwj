@@ -31,6 +31,25 @@ from hbn_structural import _zscore  # noqa: E402
 VC = "/data/derivatives/volume_conduction"
 FM_GLOB = "/data/derivatives/peer_fm_ww/hbn_full/emb/*.npz"
 SEED = 0                                        # fixed; scripts forbid Math.random-style nondeterminism
+TRAINED = {"neurostorm", "swift", "cortex_mae_volume"}   # known trained keys
+RANDINIT_TOKENS = ("rand", "init", "untrain", "scratch", "shuffle")  # untrained-deep-FM key patterns
+
+
+def _all_keys():
+    ks = set()
+    for f in sorted(glob.glob(FM_GLOB)):
+        try:
+            ks |= set(np.load(f, allow_pickle=True).keys())
+        except Exception:
+            continue
+    return ks
+
+
+def _randinit_keys():
+    """Untrained-deep-FM keys, once an fmri-fm/emeg-fm run drops a random-init checkpoint's embeddings.
+    Matched by name pattern and by not being one of the known trained keys."""
+    return sorted(k for k in _all_keys()
+                  if k not in TRAINED and any(t in k.lower() for t in RANDINIT_TOKENS))
 
 
 def _load_fm(name):
@@ -70,7 +89,15 @@ def main():
     for name in ["neurostorm", "swift", "cortex_mae_volume"]:
         _row(f"learned:{name}", _load_fm(name))
 
-    print("-- UNTRAINED random projection of real brain input (morphometry) --")
+    ri_keys = _randinit_keys()
+    if ri_keys:
+        print("-- TRUE untrained-deep-FM control (random-init checkpoint embeddings on disk) --")
+        for k in ri_keys:
+            _row(f"randinit-FM:{k}", _load_fm(k))
+    else:
+        print("-- TRUE untrained-deep-FM control: no random-init checkpoint embeddings on disk yet --")
+
+    print("-- UNTRAINED random projection of real brain input (morphometry; linear proxy) --")
     for d_out in [288, 768]:
         _row(f"randproj(morph)->d{d_out}", _rand_proj(morph, d_out, rng))
 
@@ -78,9 +105,16 @@ def main():
     _row("raw morphometry (classical input)", morph)
     _row("pure Gaussian noise (no brain data)", rng.standard_normal((morph.shape[0], 288)))
 
-    print("\nReading: if the untrained random projection of morphometry is ALSO super-critical (α<2, gated),\n"
-          "then α_cov<2 is inherited from the brain-input covariance geometry — a diagnostic of representational\n"
-          "geometry, NOT evidence the FM learned useful structure. The pure-noise row should FAIL the gate.")
+    if ri_keys:
+        print("\nTRUE CONTROL PRESENT. Reading: super-critical trained FMs (α<2) vs the random-init deep FM.\n"
+              "If the random-init FM stays at/above critical (α≈2) like the linear proxy, α_cov<2 is confirmed a\n"
+              "genuine imprint of *pretraining* (not architecture/high-dim) — the strong form of diagnostic-not-\n"
+              "predictor. If the random-init FM is ALSO super-critical, the signature is architecture-driven and\n"
+              "the covariance-α framing must be weakened accordingly.")
+    else:
+        print("\nReading (proxy only so far): the untrained random *projection* of morphometry stays critical\n"
+              "(α≈2), so super-criticality is not a mere high-dim artifact. The linear proxy stands in until a\n"
+              "random-init deep-FM checkpoint's embeddings land; rerun this script then for the exact control.")
 
 
 if __name__ == "__main__":
