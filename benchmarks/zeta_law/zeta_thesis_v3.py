@@ -20,7 +20,7 @@ import jax.numpy as jnp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wwj import alpha_posterior  # noqa: E402
-from zeta_diagnostic import rank_decay_from_density_alpha  # noqa: E402
+from zeta_diagnostic import rank_decay_from_density_alpha, source_spectrum, source_rank  # noqa: E402
 
 P, NBIG, COV_A, SNR, RIDGE, NTEST = 120, 9000, 1.0, 4.0, 0.5, 1500
 NS = [40, 80, 160, 320, 640, 1280, 2560, 5000]
@@ -59,20 +59,6 @@ def n_to_reach(lc, thr=0.7):
     return float(NS[-1] * 2)                                   # censored: never reached
 
 
-def unsorted_alignment(X, y, ridge_frac=1e-3):
-    Xc, yc = X - X.mean(0), y - y.mean()
-    C = Xc.T @ Xc / len(Xc)
-    w, V = np.linalg.eigh(C); w, V = w[::-1], V[:, ::-1]      # descending eigenvalue order
-    coeff = V.T @ (Xc.T @ yc / len(Xc))
-    lam = np.clip(w, 0.0, None)
-    return coeff ** 2 / (lam + ridge_frac * lam.max())         # aρ in EIGENVALUE-RANK order (unsorted)
-
-
-def rho_q(a, q=0.7):
-    c = np.cumsum(a) / a.sum()
-    return int(np.searchsorted(c, q) + 1)
-
-
 def beta_sorted(a):
     s = np.sort(a)[::-1]
     return rank_decay_from_density_alpha(alpha_posterior(jnp.asarray(s))["alpha_mean"])
@@ -100,8 +86,8 @@ def main():
     for name, g in targets.items():
         X, y = make(g)
         n = n_to_reach(ridge_curve(X, y))
-        a = unsorted_alignment(X, y)
-        b, r = beta_sorted(a), rho_q(a)
+        a, _ = source_spectrum(X, y)
+        b, r = beta_sorted(a), source_rank(a)
         ns.append(n); bs.append(b); rq.append(r)
         print(f"{name:12s} | {n:7.0f} | {b:8.2f} | {r:6d}", flush=True)
     ln = np.log(ns)

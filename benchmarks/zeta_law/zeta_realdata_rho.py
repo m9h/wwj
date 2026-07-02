@@ -19,7 +19,7 @@ import jax.numpy as jnp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from wwj import alpha_posterior  # noqa: E402
-from zeta_diagnostic import rank_decay_from_density_alpha  # noqa: E402
+from zeta_diagnostic import rank_decay_from_density_alpha, source_spectrum, source_rank  # noqa: E402
 from hbn_e1 import MANIFEST  # noqa: E402
 from hbn_structural import _zscore  # noqa: E402
 from hbn_fm_existing import fm_embed, R as FMR  # noqa: E402
@@ -57,19 +57,6 @@ def load_fm_cache(model, rows):
             continue
         subs.append(r["sub"]); E.append(d[model])
     return (np.vstack(E) if E else np.zeros((0, 1))), subs
-
-
-def unsorted_alignment(X, y, ridge_frac=1e-3):
-    Xc, yc = X - X.mean(0), y - y.mean()
-    C = Xc.T @ Xc / len(Xc)
-    w, V = np.linalg.eigh(C); w, V = w[::-1], V[:, ::-1]
-    coeff = V.T @ (Xc.T @ yc / len(Xc))
-    lam = np.clip(w, 0.0, None)
-    return coeff ** 2 / (lam + ridge_frac * lam.max()), lam
-
-
-def rho_q(a, q=0.7):
-    return int(np.searchsorted(np.cumsum(a) / a.sum(), q) + 1)
 
 
 def beta_sorted(a):
@@ -140,10 +127,10 @@ def main():
             if int(m.sum()) < 200:
                 continue
             Xm, ym = X[m], y[m]
-            a, lam = unsorted_alignment(Xm, ym)
+            a, lam = source_spectrum(Xm, ym)
             ridge = float(lam.sum())                    # = trace(C); the calibrated scale (matches the CV probe)
             ceil, nsuff = curve_and_nsuff(Xm, ym, binary, ridge)
-            rq, bs = rho_q(a), beta_sorted(a)
+            rq, bs = source_rank(a), beta_sorted(a)
             tag = f"{nsuff:7.0f}" if nsuff is not None else "  (null)"
             print(f"{name:13s} {tname:4s} | {int(m.sum()):5d} {ceil:5.2f} {tag} | {rq:6d} {bs:6.2f}", flush=True)
             if nsuff is not None:

@@ -39,15 +39,25 @@ def covariance_spectrum(X: np.ndarray) -> np.ndarray:
     return np.asarray(_eigvals(jnp.asarray(X, dtype=jnp.float64)))
 
 
-def alignment_spectrum(X: np.ndarray, y: np.ndarray, ridge_frac: float = 1e-3) -> np.ndarray:
-    """Per-mode **explained variance** of the target — the covariance-deconfounded aligned signal
-    energy, `coeffᵢ² / λᵢ` (Canatar–Pehlevan target power), sorted descending.
+def source_spectrum(X: np.ndarray, y: np.ndarray, ridge_frac: float = 1e-3):
+    """Position-preserving Canatar–Bordelon–Pehlevan **source** spectrum: the covariance-deconfounded
+    per-mode target power `aᵢ = coeffᵢ² / λᵢ`, kept in **eigenvalue-rank order** (NOT magnitude-sorted).
 
-    Using the raw cross-covariance `coeffᵢ²` instead conflates the target with the covariance decay
-    (every target then looks concentrated → spurious β>1, as the first HBN run showed); dividing by the
-    eigenvalue isolates the target's spectral content. The division is ridge-regularized
-    (`+ ridge_frac·λ_max`) so near-zero (noise) eigenvalues do not blow up. The full kernel-target-
-    alignment normalization is a further refinement."""
+    This is the raw material for both data-side predictors, and the sort is the fork between them:
+      * keep it in eigenrank order  → the source spectrum, fed to `source_rank` (ρ_q).  Keeps *which*
+        eigenmode carries the signal.
+      * sort it by magnitude        → Thompson's β pipeline (`alignment_spectrum`).  Discards position.
+    Eigenmode position is exactly what sets data sufficiency (high-λ modes are learnable with little
+    data, low-λ modes are data-hungry), so the sort is where the single-β sufficiency claim loses its
+    information (falsified: synthetic Spearman ≈0.25, real ≈−0.02; ρ_q recovers ≈0.96 / ≈0.53).
+
+    Deconfounding note: using the raw cross-covariance `coeffᵢ²` instead conflates the target with the
+    covariance decay (every target then looks concentrated → spurious β>1, as the first HBN run showed);
+    dividing by the eigenvalue isolates the target's spectral content. The division is ridge-regularized
+    (`+ ridge_frac·λ_max`) so near-zero (noise) eigenvalues do not blow up.
+
+    Returns `(a, lam)`: the source power `a` in descending-eigenvalue order, and the eigenvalues `lam`
+    (also descending). `lam.sum() = trace(C)` is the calibrated ridge scale for the matched CV probe."""
     Xc = X - X.mean(0, keepdims=True)
     yc = np.asarray(y, dtype=float) - float(np.mean(y))
     C = (Xc.T @ Xc) / Xc.shape[0]
@@ -56,7 +66,32 @@ def alignment_spectrum(X: np.ndarray, y: np.ndarray, ridge_frac: float = 1e-3) -
     cross = (Xc.T @ yc) / Xc.shape[0]            # cross-covariance vector
     coeff = V.T @ cross                          # target coefficient per eigenmode
     lam = np.clip(w, 0.0, None)
-    a = coeff ** 2 / (lam + ridge_frac * float(lam.max()))   # explained variance per mode
+    a = coeff ** 2 / (lam + ridge_frac * float(lam.max()))   # per-mode source power, eigenrank order
+    return a, lam
+
+
+def source_rank(a: np.ndarray, q: float = 0.7) -> int:
+    """ρ_q — the position-preserving CBP **source predictor** of data sufficiency: the number of top
+    eigenmodes (in eigenvalue-rank order; pass the `a` from `source_spectrum`, NOT a sorted spectrum)
+    whose cumulative source mass first reaches fraction `q` of the total.
+
+    Small ρ_q = signal concentrated in a few learnable high-λ modes = data-cheap; large ρ_q = signal
+    spread into low-λ (data-hungry) modes. Forecasts N-to-reach-target at Spearman ≈0.96 (synthetic) /
+    ≈0.53 (real HBN), where Thompson's single magnitude-sorted β does not (≈0.25 / ≈−0.02) — the named
+    replacement for the sorted exponent as a sufficiency predictor.
+
+    GOODHART CAVEAT: like α (weights) and β (data), ρ_q must be reported jointly with held-out
+    separability — compressing a representation into fewer modes shrinks ρ_q without discovering any
+    new learnable signal, so the exponent must never be read alone."""
+    a = np.asarray(a, dtype=float)
+    return int(np.searchsorted(np.cumsum(a) / a.sum(), q) + 1)
+
+
+def alignment_spectrum(X: np.ndarray, y: np.ndarray, ridge_frac: float = 1e-3) -> np.ndarray:
+    """Thompson's β material: the `source_spectrum` per-mode power sorted **descending by magnitude**
+    (position discarded). Feed to the density-α → β pipeline (`diagnose_spectrum(..., 'alignment')`).
+    For the position-preserving predictor use `source_spectrum` + `source_rank` instead."""
+    a, _ = source_spectrum(X, y, ridge_frac)
     return np.sort(a)[::-1]                      # aligned energy, descending
 
 
@@ -140,8 +175,22 @@ def main() -> None:
           f"(logBF pl/exp={dmp['logbf_pl_vs_exponential']:+.1f}, ppc p={dmp['ppc_pvalue']:.2f})  "
           f"-> {'OK' if good else 'CHECK'}")
 
+    # (4) source_rank ρ_q is monotone in eigenmode position (deeper signal ⇒ larger ρ_q)
+    rng = np.random.default_rng(0)
+    P, NB = 120, 4000
+    lam = np.arange(1, P + 1.0) ** -1.0
+    Z = rng.standard_normal((NB, P)); Xs = Z * np.sqrt(lam)
+    rqs = []
+    for k in (0, 19, 89):                        # signal planted in mode 1, 20, 90
+        ys = Z[:, k] + 0.5 * rng.standard_normal(NB)
+        a, _ = source_spectrum(Xs, ys)
+        rqs.append(source_rank(a))
+    mono = rqs[0] <= rqs[1] <= rqs[2]
+    ok &= mono
+    print(f"  source_rank ρ_0.7 vs planted depth (mode 1/20/90): {rqs}  monotone -> {'OK' if mono else 'CHECK'}")
+
     print("-" * 56)
-    print(f"VERDICT: {'data-side zeta diagnostic recovers planted s/β and rejects the random (MP) null — OK'
+    print(f"VERDICT: {'data-side zeta diagnostic recovers planted s/β, ρ_q tracks position, rejects MP null — OK'
                       if ok else 'CHECK — a synthetic case did not pass'}")
 
 
