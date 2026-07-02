@@ -14,6 +14,8 @@
 \newcommand{\DsCbpMae}{0.012}           % CBP parameter-free curve vs simulation, MAE (true spectra)
 \newcommand{\DsCbpReal}{0.14}           % robust-CBP fair-LOO skill, real high-ceiling
 \newcommand{\DsPlReal}{0.69}            % flexible power-law fair-LOO skill, real high-ceiling
+\newcommand{\DsAlphaLearned}{1.4\text{--}1.6}  % covariance-alpha of trained FMs (zeta_randinit_control)
+\newcommand{\DsAlphaRand}{2.0}          % covariance-alpha of UNTRAINED random projection of brain input
 % ---------------------------------------------------------------
 
 \section{Data Side: The Same Calibrated Lens Overturns Thompson's Discoverability Exponent}
@@ -85,6 +87,33 @@ $\beta$ from $0.4$ to $1.5$--$4.5$) without any gain in held-out separability (t
 CV-AUC do not move). This is the data-side image of the weight-side $\alpha\!\to\!2$ regularizer:
 a single shape exponent can be driven by discarding information rather than discovering it, so it must be
 reported jointly with held-out quality, never alone.
+
+\textbf{Why a language-model discoverability law may not transfer to neuroimaging.} Thompson's exponent
+imports an intuition born in large language models --- that a clean spectral regularity of a frozen
+representation forecasts what more data will buy. Two facts about neuroimaging foundation models make that
+import fragile in ways that do not arise for language. First, \emph{these representations do not scale like
+language models}: a systematic clinical-EEG benchmark (NeuroAtlas; \citealp{kontras2026neuroatlas}, 42
+datasets, $\sim$260k hours) finds brain-age accuracy essentially uncorrelated with embedding dimension
+(Spearman $\rho\!\approx\!-0.14$ to $-0.29$, n.s.) and EEG-specific pretraining no better than generic
+time-series foundation models, or than a \emph{random-initialised} backbone, on most tasks. A
+sufficiency law read off the representation spectrum has no language-model-style scaling regularity to
+inherit here. Second, decoding on these models is partly \emph{confound-driven} (motor-imagery accuracy
+collapses below chance once oculomotor artifacts are filtered), so an alignment spectrum computed on such
+embeddings is in part measuring artifact rather than neural signal --- a concrete source of the gap between
+our synthetic ($\rho_q\!=\!\DsRhoSynth$) and real ($\DsRhoReal$) recovery.
+
+This directly qualifies our covariance-$\alpha$ signature, and a control pins down what it does and does not
+mean. If super-criticality were merely geometric --- a consequence of projecting a heavy-tailed brain-data
+covariance into high dimension --- then an \emph{untrained} random map of a real brain input should be
+super-critical too. It is not: an untrained random Gaussian projection of structural morphometry stays at
+the critical point ($\alpha_{\rm cov}\!\approx\!\DsAlphaRand$, tracking its input), pure noise is rejected by
+the validity gate, and only the \emph{trained} foundation models are super-critical
+($\alpha_{\rm cov}\!\approx\!\DsAlphaLearned$, $P(\alpha<2)=1.00$). So $\alpha_{\rm cov}<2$ is a real imprint
+of pretraining, not a high-dimensional artifact. Yet NeuroAtlas shows those same pretrained models barely
+outperform their random-initialised counterparts \emph{downstream}. The two facts together give the sharpest
+statement of the paper's thesis: the exponent faithfully \emph{detects} that training reshaped the
+representation's spectrum, while carrying essentially no information about whether that training improved
+what can be predicted from it. A diagnostic of the representation, decoupled from its predictive utility.
 
 The data side therefore closes the same loop as the weight side. A single calibrated shape exponent is a
 useful \emph{diagnostic} of representational structure (the super-critical covariance signature), but as
