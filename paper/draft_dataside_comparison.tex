@@ -34,7 +34,10 @@ structure. Every learned foundation-model embedding is certifiably super-critica
 with posterior $P(\alpha<2)=1.00$ (functional and structural fMRI/sMRI models alike); every hand-built
 classical feature set sits at or above the critical point, $\alpha_{\rm cov}\ge 2$. An exact
 label-exchangeability permutation test on the learned-vs-classical split gives $p=\DsPermP$ (at the
-attainable floor for the current modality count, and tightening as more models are added). This is a
+attainable floor for the current modality count, and tightening as more models are added). The signature
+also \emph{replicates across fMRI conditions}: the same three functional models embedded on a movie-watching
+run (rather than rest) are again all super-critical ($\alpha_{\rm cov}\in[1.4,1.7]$, $P(\alpha<2)=1.00$),
+so the heavy tail is a property of the learned representation, not of a particular task. This is a
 genuine, target-free signature --- learned representations are heavy-tailed in their data covariance in a
 way classical features are not --- and it is the clean part of the data-side story.
 
