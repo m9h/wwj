@@ -31,16 +31,41 @@ from hbn_fm_existing import fm_embed, R as FMR  # noqa: E402
 VC = "/data/derivatives/volume_conduction"
 # classical/hand-built modalities; everything else (all FM-cache models + structural FMs) is learned
 CLASSICAL = {"morph_4s456", "morph_4s1056", "blockpooled", "connectome"}
+# movie-watching (Despicable Me) condition — windowed FM embeddings (win: n_windows x d), one dir per model
+MOVIE_DIR = "/data/derivatives/peer_fm_ww/hbn_window_movieDM"
+MOVIE_MANIFEST = "/data/derivatives/peer_fm_ww/hbn_moviedm_manifest.csv"
 
 
-def _age_map():
-    rows = list(csv.DictReader(open(MANIFEST)))
+def _age_from(path):
+    rows = list(csv.DictReader(open(path)))
     def f(v):
         try:
             return float(v)
         except (TypeError, ValueError):
             return float("nan")
     return {r["sub"]: f(r.get("age", "")) for r in rows}
+
+
+def _age_map():
+    return _age_from(MANIFEST)
+
+
+def _movie_embed(d):
+    """One vector per subject for a movie-condition model dir: mean-pool the windowed embedding
+    (win: n_windows x d) over time. Distinct fMRI condition from the rest/baseline arm, so a
+    genuinely different covariance spectrum (same subjects/models → coverage, not independent N)."""
+    import glob
+    X, ids = [], []
+    for f in sorted(glob.glob(d + "/*.npz")):
+        try:
+            z = np.load(f, allow_pickle=True)
+        except Exception:
+            continue
+        w = np.asarray(z["win"], float)
+        if w.ndim != 2 or w.shape[0] == 0:
+            continue
+        X.append(w.mean(0)); ids.append(os.path.basename(f)[:-4])
+    return np.asarray(X, float), ids
 
 
 def _post(eigs):
@@ -61,6 +86,15 @@ def main():
                       ("fomo60k_fm", "fomo60k_embed/fomo60k_embeddings.npz")]:
         X, ids = fm_embed(f"{FMR}/{sub}")
         mods.append((name, X, np.array([agem.get(s, np.nan) for s in ids])))
+    # movie-watching (Despicable Me) condition — NEW learned representations, a distinct fMRI condition
+    # from the rest/baseline arm (mean-pooled over windows). Skipped the 2-run + windowed-REST caches on
+    # purpose: same condition as the rest arm above, so they would be pseudo-replicates in the group test.
+    if os.path.isdir(MOVIE_DIR):
+        magem = _age_from(MOVIE_MANIFEST)
+        for name, sub in [("movie_neurostorm", "neurostorm"), ("movie_swift", "swift"), ("movie_cmae", "cmae")]:
+            X, ids = _movie_embed(f"{MOVIE_DIR}/{sub}")
+            if len(X):
+                mods.append((name, X, np.array([magem.get(s, np.nan) for s in ids])))
     for name, fn in [("morph_4s456", "morphometry_4s456.npz"), ("blockpooled", "structural_emb.npz")]:
         d = np.load(f"{VC}/{fn}", allow_pickle=True)
         ids = [str(i).replace("sub-", "") for i in d["ids"]]
