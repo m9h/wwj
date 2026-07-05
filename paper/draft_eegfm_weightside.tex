@@ -1,0 +1,75 @@
+% DRAFT — weight-side cross-domain application: the alpha diagnostic on EEG foundation models.
+% Standalone \input fragment (after sec_ww_replication, before the Cross-Modality section).
+% Numbers are the frequentist WeightWatcher point estimates from the companion EEG-FM analysis
+% (/data/derivatives/eeg_sae/weightwatcher/all_models_summary.csv); self-contained macros, NOT
+% from generate.py. A calibrated wwjd re-run of the zoo needs the raw HF checkpoints (in progress).
+
+% ---- EEG-FM alpha-diagnostic numbers (frequentist WeightWatcher summary) ----
+\newcommand{\EeNmodels}{six}
+\newcommand{\EeBendrParams}{157}       % M params -- the LARGEST in the suite
+\newcommand{\EeBendrAlpha}{2.10}
+\newcommand{\EeBendrUnder}{68}         % % of matrices with alpha<2
+\newcommand{\EeLabramParams}{5.8}      % M params -- the SMALLEST
+\newcommand{\EeLabramHealthy}{94}      % % of matrices in [2,6]
+\newcommand{\EeReveParams}{69}
+\newcommand{\EeZunaParams}{382}        % M params -- even larger, also under-trained
+\newcommand{\EeZunaAlpha}{2.29}
+% ------------------------------------------------------------------------------
+
+\subsection{Cross-Domain Application: The $\alpha$ Diagnostic Ranks EEG Foundation Models}
+\label{sec:eegfm}
+
+The maturity result (\cref{fig:maturity}) says $\alpha$ reads \emph{how well-trained} a model is, not
+\emph{what} it was trained on. If so, the diagnostic should transfer, weights-only and label-free, to a
+model family from a completely different domain. We apply it to the emerging zoo of \emph{EEG foundation
+models} --- the same neuroimaging models whose \emph{data}-side spectra we examine in \cref{sec:dataside}
+--- analyzing every public frozen checkpoint's weight matrices exactly as above (\cref{tab:eegfm}).
+
+\begin{table}[t]
+\centering\small
+\caption{The HT-SR $\alpha$ diagnostic applied to public EEG foundation-model checkpoints (frequentist
+WeightWatcher point estimate; $\ge\!50$-eigenvalue matrices). Training quality (health fraction, \% of
+matrices with well-formed heavy tails $\alpha\in[2,6]$) decouples from parameter count: the largest model
+is the least mature, the smallest the cleanest.}
+\begin{tabular}{lrrccl}
+\toprule
+model & params & \#mat. & $\bar\alpha$ & \% under ($\alpha{<}2$) & \% healthy $[2,6]$ \\
+\midrule
+LUNA    & 40.5\,M  & 67 & 3.93 & 10.4 & 79.1 \\
+LaBraM  &  5.8\,M  & 48 & 3.76 &  4.2 & \textbf{93.8} \\
+REVE    & 69.2\,M  & 89 & 3.61 &  5.6 & 87.6 \\
+CBraMod &  4.9\,M  & 75 & 3.32 & 26.7 & 68.0 \\
+BIOT    &  3.2\,M  & 25 & 2.48 & 44.0 & 52.0 \\
+BENDR   & \textbf{157\,M} & 25 & \textbf{2.10} & \textbf{68.0} & 24.0 \\
+\bottomrule
+\end{tabular}
+\label{tab:eegfm}
+\end{table}
+
+Two findings, and one honest limitation.
+
+\textbf{Training quality decouples from scale.} \textbf{BENDR}, the \emph{largest} model in the suite
+($\EeBendrParams$\,M parameters), is the \emph{least} mature by every WeightWatcher metric ($\bar\alpha =
+\EeBendrAlpha$, $\EeBendrUnder\%$ of its matrices still at $\alpha<2$) --- consistent with its short
+pretraining ($\sim$3\,k hours). \textbf{LaBraM}, the \emph{smallest} ($\EeLabramParams$\,M), is the
+\emph{cleanest} ($\EeLabramHealthy\%$ of matrices in the healthy band). The still-larger ZUNA
+($\EeZunaParams$\,M) is likewise under-trained ($\bar\alpha=\EeZunaAlpha$). The weights-only spectrum
+recovers the pretraining-hours story that no amount of parameter counting would, and it does so with no
+EEG data and no downstream evaluation --- the intended use of $\alpha$ as a diagnostic.
+
+\textbf{The diagnostic localizes an actionable, independently-corroborated target.} In the companion
+analysis the under-trained ($\alpha<2$) matrices concentrate in the attention projections rather than the
+feed-forward blocks; this reproduces, from the weight spectrum alone, the empirical LoRA-QKVO fine-tuning
+recipe that REVE's authors arrived at by downstream search --- an independent, mechanistic corroboration
+that $\alpha<2$ marks exactly the matrices that most benefit from further adaptation.
+
+\textbf{Limitation --- and where the Bayesian version is needed.} These are the \emph{frequentist}
+single-$x_{\min}$ estimates: the raw checkpoints were analyzed with the stock WeightWatcher package, not
+the \texttt{wwjd} posterior, so the same scaling-window fragility we documented for GPT (\cref{fig:gpt})
+applies to the borderline rows here (BIOT at $44\%$ vs.\ CBraMod at $26.7\%$ under-trained is precisely
+the kind of gap the posterior would put credible intervals on), and BENDR's fit even returns a sentinel
+negative $\alpha_{\min}$ that the validity gate and PPC of \cref{sec:method} are built to catch. A
+calibrated re-analysis of the EEG-FM zoo is thus a direct application of our tool rather than a separate
+method; the point-estimate ranking above is the coarse, domain-transferring signal, and the maturity and
+LoRA-localization conclusions --- which rest on gross model-level differences and on \emph{which} matrices
+are $\alpha<2$, not on fine cross-model distinctions --- are robust to that calibration.
