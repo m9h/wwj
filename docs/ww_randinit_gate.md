@@ -110,15 +110,64 @@ whether the winner *actually fits*. On DenseNet they disagree wildly. Two conseq
    architecture and shape effects will be misattributed to training. This control
    pre-empts a confound that would otherwise have gone into the paper.
 
+## Result 4 — BN arm extended (2026-07-07 run 2): established for VGG-BN, NOT for ResNet
+
+Run 1 left the claim at pooled Fisher p = 0.053 on n = 33 layers. Run 2 widened the arm
+to all four BN-VGGs, added **ResNet-18/50 as a non-VGG BatchNorm test**, and kept plain
+VGG as a negative control. Critically, `--paired` now runs the *trained* checkpoint
+through the **same code path** as the untrained one, so both sides are matched on gate
+definition by construction — no more comparing against `ww_replication.py` CSVs that
+lack a `ppc` column.
+
+Results in `/data/mhough/wwj_randinit_gate_bn/`:
+
+| group | criterion | trained | untrained | Fisher p |
+|---|---|---|---|---|
+| **VGG-BN** (11/13/16/19_bn) | gate (3-leg) | 19/55 (34.5%) | 3/55 (5.5%) | **0.0002** |
+| **VGG-BN** | best_model | 7/55 (12.7%) | **0/55 (0.0%)** | **0.0128** |
+| ResNet (18/50) | gate (3-leg) | 18/75 (24.0%) | 11/75 (14.7%) | 0.214 |
+| ResNet (18/50) | best_model | 18/75 (24.0%) | 10/75 (13.3%) | 0.142 |
+| plain VGG (control) | gate (3-leg) | 2/25 (8.0%) | 1/25 (4.0%) | 1.000 |
+| plain VGG (control) | best_model | 0/25 (0.0%) | 0/25 (0.0%) | 1.000 |
+
+**Established:** for VGG-BN the training effect is real on *both* criteria, and the
+negative control behaves — plain VGG shows nothing, at 0/25 vs 0/25 on `best_model`.
+So within VGG, the power-law breakdown is training-induced and BatchNorm-specific.
+
+**Not established — and this changes the claim's name.** ResNet-18/50 carry BatchNorm
+and show the *same direction*, but neither reaches significance (p = 0.21, 0.14). At
+this n we can say "BatchNorm **in VGG**," not "BatchNorm." Whether ResNet is genuinely
+different (residual connections change the spectrum) or merely underpowered is
+unresolved. The doc previously implied a general BN claim; that was premature.
+
+**Two corrections to Result 2, from the wider run:**
+
+1. *"Untrained BN-VGG rejects at exactly zero"* is **criterion-dependent**, not
+   unconditional. It holds on `best_model` (0/55, four architectures) but **fails on the
+   3-leg gate** (3/55 = 5.5%). Run 1 stated it without that qualifier.
+2. **The untrained baseline is a single random draw per architecture.** `vgg16_bn`
+   untrained moved from 1/15 (run 1) to 0/15 (run 2) purely because the arch list
+   changed and with it the RNG stream. Per-architecture untrained rates therefore carry
+   seed noise on top of binomial noise. The pooled numbers are robust to this; the
+   per-architecture ones are not, and should not be quoted individually. **Multiple init
+   seeds per architecture is the outstanding fix.**
+
+Per-architecture Fisher tests are mostly non-significant even now (only `vgg16_bn`
+p = 0.042 and `vgg19_bn` p = 0.041 on the 3-leg gate; none on `best_model`). The result
+lives in the pooled comparison — report it that way.
+
 ## What this licenses, and what it does not
 
 **Licensed:** the gate rejects known-random matrices with a 0% false-positive rate at
-all aspect ratios, so rejection-based evidence is admissible. The BN breakdown is
-training-induced, not an init artifact.
+all aspect ratios, so rejection-based evidence is admissible. For **VGG-BN**, the
+power-law breakdown is training-induced rather than an init/shape artifact, significant
+on both criteria (p = 0.0002 and 0.0128, n = 110), with a clean negative control in
+plain VGG.
 
-**Not licensed:** the BN effect size (p = 0.053, n = 33). Any cross-criterion
-comparison of rejection rates. Any claim about DenseNet before the trained-vs-untrained
-pair is run.
+**Not licensed:** any claim that this generalises to BatchNorm beyond VGG — ResNet-18/50
+show the direction but not significance. Per-architecture rejection rates quoted
+individually (single init draw + small counts). Any cross-criterion comparison of
+rejection rates. Any claim about DenseNet before the trained-vs-untrained pair is run.
 
 ## Reproduce
 
@@ -131,8 +180,11 @@ uv run --extra benchmarks python benchmarks/ww_randinit_gate.py --synthetic-only
 
 ## Next
 
-- Extend the BN arm (vgg11_bn, vgg13_bn, + a non-VGG BN architecture) to get the
-  pooled test off p = 0.053.
+- DONE (Result 4): BN arm extended; VGG-BN established, ResNet inconclusive.
+- **Multiple init seeds per architecture** -- the untrained baseline is currently one
+  random draw, and per-architecture rates move with the RNG stream.
+- Resolve ResNet: more BN architectures, or determine whether residual connections
+  genuinely change the spectrum.
 - Trained-vs-untrained DenseNet pair, using the baseline established here
   (`ww_replication_targets.md` §2).
 - Consider adding a `ppc_p` column to `ww_replication.py`'s output so trained and
